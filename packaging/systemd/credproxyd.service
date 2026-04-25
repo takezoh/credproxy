@@ -1,0 +1,14 @@
+[Unit]
+Description=credproxyd — credential injection proxy
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/credproxyd --config /etc/credproxyd/config.toml
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
