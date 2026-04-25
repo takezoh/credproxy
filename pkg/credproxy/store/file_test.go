@@ -54,6 +54,20 @@ func TestFileStore_Save_modeEnforced(t *testing.T) {
 	}
 }
 
+func TestFileStore_Save_writeError(t *testing.T) {
+	dir := t.TempDir()
+	s := store.NewFileStore(dir, 0)
+	// Remove write permission so WriteFile fails.
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatalf("Chmod: %v", err)
+	}
+	defer func() { _ = os.Chmod(dir, 0o700) }()
+	err := s.Save(context.Background(), "key", []byte("data"))
+	if err == nil {
+		t.Error("expected error writing to read-only directory")
+	}
+}
+
 func TestFileStore_Save_atomic(t *testing.T) {
 	dir := t.TempDir()
 	s := store.NewFileStore(dir, 0)

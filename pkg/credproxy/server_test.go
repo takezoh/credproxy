@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -177,5 +178,35 @@ func TestServer_noAuth_open(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "ok") {
 		t.Errorf("body = %q, want JSON with ok", body)
+	}
+}
+
+func TestServer_Handler(t *testing.T) {
+	srv, err := credproxy.New(credproxy.ServerConfig{
+		ListenTCP:            "127.0.0.1:0",
+		AllowUnauthenticated: true,
+		Routes: []credproxy.Route{{
+			Path: "/api",
+			Provider: &fakeProvider{inj: &credproxy.Injection{
+				BodyReplace: []byte(`{"ok":true}`),
+			}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	h := srv.Handler()
+	if h == nil {
+		t.Fatal("Handler() returned nil")
+	}
+
+	rr := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/", nil)
+	h.ServeHTTP(rr, r)
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "ok") {
+		t.Errorf("body = %q, want JSON with ok", rr.Body.String())
 	}
 }

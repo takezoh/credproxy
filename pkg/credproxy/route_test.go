@@ -269,6 +269,153 @@ func TestRouteHandler_refreshBodyReplace(t *testing.T) {
 	}
 }
 
+// refreshErrProvider returns a valid injection from Get but errors on Refresh.
+type refreshErrProvider struct {
+	getInj *credproxy.Injection
+}
+
+func (p *refreshErrProvider) Get(_ context.Context, _ credproxy.Request) (*credproxy.Injection, error) {
+	return p.getInj, nil
+}
+
+func (p *refreshErrProvider) Refresh(_ context.Context, _ credproxy.Request) (*credproxy.Injection, error) {
+	return nil, fmt.Errorf("refresh deliberately failed")
+}
+
+// errReader is an io.Reader that always returns an error.
+type errReader struct{ err error }
+
+func (e *errReader) Read(_ []byte) (int, error) { return 0, e.err }
+
+func TestRouteHandler_upstreamConnError_502(t *testing.T) {
+	// Start and immediately close a server so its port gives ECONNREFUSED.
+	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	deadURL := dead.URL
+	dead.Close()
+
+	addr := startRouteTestServer(t, credproxy.Route{
+		Path:     "/api",
+		Upstream: deadURL,
+		Provider: &fakeProvider{inj: &credproxy.Injection{}},
+	})
+	resp, err := http.Get("http://" + addr + "/api/test")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502", resp.StatusCode)
+	}
+}
+
+func TestRouteHandler_doubleRefreshBlocked_502(t *testing.T) {
+	// Upstream always returns 401. After one refresh+retry the second 401
+	// must NOT trigger another Refresh — instead the proxy returns 502.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer upstream.Close()
+
+	provider := &refreshTrackingProvider{
+		getInj:     &credproxy.Injection{},
+		refreshInj: &credproxy.Injection{}, // no BodyReplace → proxy forwards again
+	}
+
+	addr := startRouteTestServer(t, credproxy.Route{
+		Path:            "/api",
+		Upstream:        upstream.URL,
+		RefreshOnStatus: []int{401},
+		Provider:        provider,
+	})
+
+	resp, err := http.Get("http://" + addr + "/api/test")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502", resp.StatusCode)
+	}
+	if provider.refreshCalls != 1 {
+		t.Errorf("Refresh calls = %d, want exactly 1", provider.refreshCalls)
+	}
+}
+
+func TestRouteHandler_refreshError_502(t *testing.T) {
+	// Upstream returns 401; Provider.Refresh returns an error → 502.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer upstream.Close()
+
+	addr := startRouteTestServer(t, credproxy.Route{
+		Path:            "/api",
+		Upstream:        upstream.URL,
+		RefreshOnStatus: []int{401},
+		Provider:        &refreshErrProvider{getInj: &credproxy.Injection{}},
+	})
+
+	resp, err := http.Get("http://" + addr + "/api/test")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502", resp.StatusCode)
+	}
+}
+
+func TestRouteHandler_bodyReadError_400(t *testing.T) {
+	// When RefreshOnStatus is set, ServeHTTP buffers the request body.
+	// If reading the body errors, it must return 400 Bad Request.
+	srv, err := credproxy.New(credproxy.ServerConfig{
+		ListenTCP:            "127.0.0.1:0",
+		AllowUnauthenticated: true,
+		Routes: []credproxy.Route{{
+			Path:            "/api",
+			Upstream:        "http://127.0.0.1:1",
+			RefreshOnStatus: []int{401},
+			Provider:        &fakeProvider{inj: &credproxy.Injection{}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/test", &errReader{err: io.ErrUnexpectedEOF})
+	srv.Handler().ServeHTTP(rr, r)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rr.Code)
+	}
+}
+
+func TestRouteHandler_queryInjection(t *testing.T) {
+	// Injection.Query values must be appended to the upstream request URL.
+	var gotKey string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotKey = r.URL.Query().Get("api_key")
+	}))
+	defer upstream.Close()
+
+	addr := startRouteTestServer(t, credproxy.Route{
+		Path:     "/api",
+		Upstream: upstream.URL,
+		Provider: &fakeProvider{inj: &credproxy.Injection{
+			Query: map[string]string{"api_key": "secret123"},
+		}},
+	})
+
+	resp, err := http.Get("http://" + addr + "/api/test")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	_ = resp.Body.Close()
+	if gotKey != "secret123" {
+		t.Errorf("api_key query param = %q, want secret123", gotKey)
+	}
+}
+
 func TestRouteHandler_openDefault_rejected(t *testing.T) {
 	_, err := credproxy.New(credproxy.ServerConfig{
 		ListenTCP: "127.0.0.1:0",
