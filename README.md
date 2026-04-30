@@ -1,6 +1,6 @@
 # credproxy
 
-Go library for building credential injection HTTP proxies. Sandboxed agent processes (Docker containers, VMs) reach it over HTTP; it fetches credentials via a `Provider` and injects them before forwarding to the real upstream.
+Injects provider-fetched credentials into outbound HTTP requests, so sandboxed agent processes (Docker containers, VMs) never hold secrets directly.
 
 Also ships as `credproxyd` — a standalone shared daemon for hook-script-based providers.
 
