@@ -84,9 +84,9 @@ Each provider is constructed from a typed `Config` plus caller-supplied callback
 
 | Provider | Mechanism |
 |---|---|
-| `providers/awssso` | HTTP route serving `credential_process` JSON via the proxy |
-| `providers/gcloudcli` | Synthetic `CLOUDSDK_CONFIG` directory + bind-mounted access token |
-| `providers/sshagent` | Per-project ephemeral `ssh-agent` with bind-mounted socket |
+| [`providers/awssso`](providers/awssso/README.md) | HTTP route serving `credential_process` JSON via the proxy |
+| [`providers/gcloudcli`](providers/gcloudcli/README.md) | Synthetic `CLOUDSDK_CONFIG` directory + bind-mounted access token |
+| [`providers/sshagent`](providers/sshagent/README.md) | Per-project ephemeral `ssh-agent` with bind-mounted socket |
 
 ---
 

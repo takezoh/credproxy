@@ -139,7 +139,7 @@ container/              Container-injection abstraction
   spec.go               Spec{Env, Mounts} — per-launch contribution
   provider.go           Provider interface (Name/Init/Routes/ContainerSpec)
   runhash.go            ProjectRunHash — stable per-project run-dir name
-providers/              Pre-built container.Provider implementations
+providers/              Pre-built container.Provider implementations — see each package README
   awssso/               AWS SSO via credential_process + HTTP route
   gcloudcli/            Synthetic CLOUDSDK_CONFIG + host-refreshed access token
   sshagent/             Per-project ephemeral ssh-agent
