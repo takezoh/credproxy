@@ -1,6 +1,6 @@
 # credproxy
 
-Injects provider-fetched credentials into outbound HTTP requests, so sandboxed agent processes (Docker containers, VMs) never hold secrets directly.
+Brokers credentials to sandboxed agent processes (Docker containers, VMs) so they never hold secrets directly. Routes either inject auth headers into proxied requests, or serve a synthetic body that emulates a credential endpoint (e.g. AWS ECS).
 
 Also ships as `credproxyd` — a standalone shared daemon for hook-script-based providers.
 
