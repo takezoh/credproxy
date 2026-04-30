@@ -80,10 +80,12 @@ func (h *routeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	proxyReq := Request{
-		Method:   r.Method,
-		Path:     r.URL.Path,
-		Host:     r.Host,
-		Metadata: nil,
+		Method: r.Method,
+		Path:   r.URL.Path,
+		Host:   r.Host,
+	}
+	if id, ok := r.Context().Value(tokenIDKey{}).(string); ok && id != "" {
+		proxyReq.Metadata = map[string]string{"token_id": id}
 	}
 
 	injection, err := h.cfg.Provider.Get(r.Context(), proxyReq)

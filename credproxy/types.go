@@ -63,6 +63,14 @@ type Route struct {
 	StripInboundAuth bool
 }
 
+// TokenAuth pairs a bearer token with a caller-assigned identifier.
+// The identifier is forwarded to providers via Request.Metadata["token_id"],
+// enabling per-token access control without exposing the raw token value.
+type TokenAuth struct {
+	Token string // bearer token value
+	ID    string // identifier passed to providers via Request.Metadata["token_id"]
+}
+
 // ServerConfig configures the proxy server.
 type ServerConfig struct {
 	// ListenTCP is the TCP address to listen on, e.g. "127.0.0.1:9787".
@@ -76,7 +84,7 @@ type ServerConfig struct {
 	// AuthTokens is the set of valid bearer tokens.
 	// If non-empty, every route request must carry a matching Authorization: Bearer header.
 	// If empty, AllowUnauthenticated must be true; otherwise New() returns an error.
-	AuthTokens []string
+	AuthTokens []TokenAuth
 	// AllowUnauthenticated disables bearer authentication entirely when true.
 	// Should only be set for Unix-socket-only servers protected by OS file permissions.
 	AllowUnauthenticated bool

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/takezoh/credproxy/pkg/credproxy"
+	"github.com/takezoh/credproxy/credproxy"
 )
 
 func TestTTLCache_getSetInvalidate(t *testing.T) {

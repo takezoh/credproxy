@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/takezoh/credproxy/pkg/credproxy"
+	"github.com/takezoh/credproxy/credproxy"
 )
 
 // buildHookRequest encodes the hook stdin payload as a single JSON line.

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/takezoh/credproxy/pkg/credproxy"
+	"github.com/takezoh/credproxy/credproxy"
 )
 
 // refreshTrackingProvider counts Refresh calls and returns distinct injections per call.
@@ -416,14 +416,23 @@ func TestRouteHandler_queryInjection(t *testing.T) {
 	}
 }
 
-func TestRouteHandler_openDefault_rejected(t *testing.T) {
-	_, err := credproxy.New(credproxy.ServerConfig{
+// TestServer_noTokens_openByDefault verifies that a server with no registered tokens
+// does not require authentication (auth is enforced only once AddAuthToken is called).
+func TestServer_noTokens_openByDefault(t *testing.T) {
+	addr := startTestServer(t, credproxy.ServerConfig{
 		ListenTCP: "127.0.0.1:0",
-		Routes:    []credproxy.Route{},
-		// No AuthTokens, no AllowUnauthenticated — must fail.
+		Routes: []credproxy.Route{{
+			Path:     "/api",
+			Provider: &fakeProvider{inj: &credproxy.Injection{BodyReplace: []byte(`{"ok":true}`)}},
+		}},
 	})
-	if err == nil {
-		t.Error("expected error when AuthTokens empty and AllowUnauthenticated false on TCP listener")
+	resp, err := http.Get(fmt.Sprintf("http://%s/api/", addr))
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200 (no tokens registered → auth skipped)", resp.StatusCode)
 	}
 }
 

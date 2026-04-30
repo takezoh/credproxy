@@ -33,22 +33,27 @@ func TestExtractBearer(t *testing.T) {
 	}
 }
 
-func TestMatchToken(t *testing.T) {
-	tokens := [][]byte{[]byte("alpha"), []byte("beta")}
+func TestMatchTokenEntries(t *testing.T) {
+	entries := []tokenEntry{
+		{token: []byte("alpha"), id: "id-alpha"},
+		{token: []byte("beta"), id: "id-beta"},
+	}
 	tests := []struct {
 		presented []byte
-		want      bool
+		wantID    string
+		wantOK    bool
 	}{
-		{[]byte("alpha"), true},
-		{[]byte("beta"), true},
-		{[]byte("gamma"), false},
-		{[]byte(""), false},
-		{[]byte("alph"), false},
-		{[]byte("alphax"), false},
+		{[]byte("alpha"), "id-alpha", true},
+		{[]byte("beta"), "id-beta", true},
+		{[]byte("gamma"), "", false},
+		{[]byte(""), "", false},
+		{[]byte("alph"), "", false},
+		{[]byte("alphax"), "", false},
 	}
 	for _, tt := range tests {
-		if got := matchToken(tokens, tt.presented); got != tt.want {
-			t.Errorf("matchToken(%q) = %v, want %v", tt.presented, got, tt.want)
+		gotID, gotOK := matchTokenEntries(entries, tt.presented)
+		if gotOK != tt.wantOK || gotID != tt.wantID {
+			t.Errorf("matchTokenEntries(%q) = (%q, %v), want (%q, %v)", tt.presented, gotID, gotOK, tt.wantID, tt.wantOK)
 		}
 	}
 }

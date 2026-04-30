@@ -7,11 +7,11 @@ Also ships as `credproxyd` — a standalone shared daemon for hook-script-based 
 ## Library Usage
 
 ```go
-import "github.com/takezoh/credproxy/pkg/credproxy"
+import "github.com/takezoh/credproxy/credproxy"
 
 srv, err := credproxy.New(credproxy.ServerConfig{
     ListenTCP:  "127.0.0.1:0",          // ephemeral port
-    AuthTokens: []string{myBearerToken},
+    AuthTokens: []credproxy.TokenAuth{{Token: myBearerToken, ID: "my-client"}},
     Routes: []credproxy.Route{
         {
             Path:             "/anthropic",
@@ -55,10 +55,38 @@ type Store interface {
 `FileStore` is provided:
 
 ```go
-import "github.com/takezoh/credproxy/pkg/credproxy/store"
+import "github.com/takezoh/credproxy/credproxy/store"
 
 s := store.NewFileStore("~/.mytool/credentials", 0) // mode 0600 enforced
 ```
+
+## Container Providers
+
+For agents running in containers, `container.Provider` abstracts the per-launch contribution of env vars and bind-mounts a credential backend needs. Pre-built implementations live under `providers/`:
+
+```go
+import (
+    "github.com/takezoh/credproxy/container"
+    "github.com/takezoh/credproxy/providers/awssso"
+    "github.com/takezoh/credproxy/providers/gcloudcli"
+    "github.com/takezoh/credproxy/providers/sshagent"
+)
+
+type Provider interface {
+    Name() string
+    Init() error                       // create host-side directories etc.
+    Routes() []credproxy.Route         // HTTP routes to register on the proxy (may be nil)
+    ContainerSpec(ctx, projectPath) (container.Spec, error)
+}
+```
+
+Each provider is constructed from a typed `Config` plus caller-supplied callbacks (project allowlists, token providers). Providers contain no caller-specific concepts and can be used independently of the proxy server.
+
+| Provider | Mechanism |
+|---|---|
+| `providers/awssso` | HTTP route serving `credential_process` JSON via the proxy |
+| `providers/gcloudcli` | Synthetic `CLOUDSDK_CONFIG` directory + bind-mounted access token |
+| `providers/sshagent` | Per-project ephemeral `ssh-agent` with bind-mounted socket |
 
 ---
 

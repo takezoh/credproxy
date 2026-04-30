@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/takezoh/credproxy/pkg/credproxy"
+	"github.com/takezoh/credproxy/credproxy"
 )
 
 // fakeProvider returns a fixed Injection for every Get/Refresh call.
@@ -72,7 +72,7 @@ func TestServer_healthz(t *testing.T) {
 func TestServer_bearerAuth_rejects(t *testing.T) {
 	addr := startTestServer(t, credproxy.ServerConfig{
 		ListenTCP:  "127.0.0.1:0",
-		AuthTokens: []string{"valid-token"},
+		AuthTokens: []credproxy.TokenAuth{{Token: "valid-token", ID: "test"}},
 		Routes: []credproxy.Route{{
 			Path:     "/api",
 			Upstream: "http://localhost:1",
@@ -94,7 +94,7 @@ func TestServer_bearerAuth_rejects(t *testing.T) {
 func TestServer_bearerAuth_accepts(t *testing.T) {
 	addr := startTestServer(t, credproxy.ServerConfig{
 		ListenTCP:  "127.0.0.1:0",
-		AuthTokens: []string{"secret"},
+		AuthTokens: []credproxy.TokenAuth{{Token: "secret", ID: "test"}},
 		Routes: []credproxy.Route{{
 			Path: "/api",
 			Provider: &fakeProvider{inj: &credproxy.Injection{
@@ -208,5 +208,139 @@ func TestServer_Handler(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "ok") {
 		t.Errorf("body = %q, want JSON with ok", rr.Body.String())
+	}
+}
+
+// recordingProvider captures the Request passed to Get so tests can inspect Metadata.
+type recordingProvider struct {
+	lastReq credproxy.Request
+	inj     *credproxy.Injection
+}
+
+func (p *recordingProvider) Get(_ context.Context, req credproxy.Request) (*credproxy.Injection, error) {
+	p.lastReq = req
+	return p.inj, nil
+}
+
+func (p *recordingProvider) Refresh(_ context.Context, req credproxy.Request) (*credproxy.Injection, error) {
+	p.lastReq = req
+	return p.inj, nil
+}
+
+// TestServer_tokenID_propagated verifies that the matched token's ID reaches the provider
+// via Request.Metadata["token_id"].
+func TestServer_tokenID_propagated(t *testing.T) {
+	provider := &recordingProvider{inj: &credproxy.Injection{BodyReplace: []byte(`{}`)}}
+	addr := startTestServer(t, credproxy.ServerConfig{
+		ListenTCP:  "127.0.0.1:0",
+		AuthTokens: []credproxy.TokenAuth{{Token: "tok-abc", ID: "proj-A"}},
+		Routes: []credproxy.Route{{
+			Path:     "/creds",
+			Provider: provider,
+		}},
+	})
+
+	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s/creds/", addr), nil)
+	req.Header.Set("Authorization", "Bearer tok-abc")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := provider.lastReq.Metadata["token_id"]; got != "proj-A" {
+		t.Errorf("Metadata[token_id] = %q, want %q", got, "proj-A")
+	}
+}
+
+// TestServer_AddAuthToken_dynamic verifies that a token registered after New() is accepted.
+func TestServer_AddAuthToken_dynamic(t *testing.T) {
+	provider := &fakeProvider{inj: &credproxy.Injection{BodyReplace: []byte(`{"ok":true}`)}}
+	srv, err := credproxy.New(credproxy.ServerConfig{
+		ListenTCP: "127.0.0.1:0",
+		// Empty AuthTokens: auth skipped until a token is added.
+		Routes: []credproxy.Route{{Path: "/api", Provider: provider}},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go func() { _ = srv.Run(ctx) }()
+	addr := srv.Addr()
+	for i := 0; i < 50; i++ {
+		conn, err2 := net.Dial("tcp", addr)
+		if err2 == nil {
+			_ = conn.Close()
+			break
+		}
+	}
+
+	srv.AddAuthToken("dynamic-secret", "dynamic-proj")
+
+	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s/api/", addr), nil)
+	req.Header.Set("Authorization", "Bearer dynamic-secret")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+// TestServer_AddAuthToken_idempotent verifies replacing a token with the same ID works.
+func TestServer_AddAuthToken_idempotent(t *testing.T) {
+	provider := &recordingProvider{inj: &credproxy.Injection{BodyReplace: []byte(`{}`)}}
+	srv, err := credproxy.New(credproxy.ServerConfig{
+		ListenTCP:  "127.0.0.1:0",
+		AuthTokens: []credproxy.TokenAuth{{Token: "old-token", ID: "proj-X"}},
+		Routes:     []credproxy.Route{{Path: "/api", Provider: provider}},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go func() { _ = srv.Run(ctx) }()
+	addr := srv.Addr()
+	for i := 0; i < 50; i++ {
+		conn, err2 := net.Dial("tcp", addr)
+		if err2 == nil {
+			_ = conn.Close()
+			break
+		}
+	}
+
+	srv.AddAuthToken("new-token", "proj-X")
+
+	// Old token must be rejected.
+	reqOld, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s/api/", addr), nil)
+	reqOld.Header.Set("Authorization", "Bearer old-token")
+	respOld, err := http.DefaultClient.Do(reqOld)
+	if err != nil {
+		t.Fatalf("old-token request: %v", err)
+	}
+	defer func() { _ = respOld.Body.Close() }()
+	if respOld.StatusCode != http.StatusUnauthorized {
+		t.Errorf("old token: status = %d, want 401", respOld.StatusCode)
+	}
+
+	// New token must be accepted and carry the same ID.
+	reqNew, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s/api/", addr), nil)
+	reqNew.Header.Set("Authorization", "Bearer new-token")
+	respNew, err := http.DefaultClient.Do(reqNew)
+	if err != nil {
+		t.Fatalf("new-token request: %v", err)
+	}
+	defer func() { _ = respNew.Body.Close() }()
+	if respNew.StatusCode != http.StatusOK {
+		t.Errorf("new token: status = %d, want 200", respNew.StatusCode)
+	}
+	if got := provider.lastReq.Metadata["token_id"]; got != "proj-X" {
+		t.Errorf("Metadata[token_id] = %q, want %q", got, "proj-X")
 	}
 }

@@ -12,7 +12,7 @@ import (
 
 	"github.com/takezoh/credproxy/cmd/credproxyd/config"
 	"github.com/takezoh/credproxy/cmd/credproxyd/providers/script"
-	"github.com/takezoh/credproxy/pkg/credproxy"
+	"github.com/takezoh/credproxy/credproxy"
 )
 
 func main() {
@@ -39,12 +39,16 @@ func run() error {
 	initLogger(cfg.LogLevel)
 	slog.Info("credproxyd starting", "config", *cfgPath)
 
-	var tokens []string
+	var rawTokens []string
 	if cfg.AuthTokensFile != "" {
-		tokens, err = config.LoadTokens(cfg.AuthTokensFile)
+		rawTokens, err = config.LoadTokens(cfg.AuthTokensFile)
 		if err != nil {
 			return err
 		}
+	}
+	tokens := make([]credproxy.TokenAuth, len(rawTokens))
+	for i, t := range rawTokens {
+		tokens[i] = credproxy.TokenAuth{Token: t, ID: fmt.Sprintf("token-%d", i)}
 	}
 
 	routes := buildRoutes(cfg.Routes)

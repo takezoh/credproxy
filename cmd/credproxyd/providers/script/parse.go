@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/takezoh/credproxy/pkg/credproxy"
+	"github.com/takezoh/credproxy/credproxy"
 )
 
 // parseHookResponse decodes hook stdout into an Injection and an optional cache expiry.

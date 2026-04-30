@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/takezoh/credproxy/pkg/credproxy"
+	"github.com/takezoh/credproxy/credproxy"
 )
 
 const defaultSafety = 30 * time.Second

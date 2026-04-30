@@ -8,17 +8,25 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
 const defaultShutdownTimeout = 15 * time.Second
 const defaultUnixMode = 0o600
 
+// tokenEntry stores a single bearer token and its caller-assigned identifier.
+type tokenEntry struct {
+	token []byte
+	id    string
+}
+
 // Server is the credential proxy HTTP server.
 type Server struct {
 	cfg       ServerConfig
 	log       *slog.Logger
-	tokens    [][]byte
+	tokensMu  sync.RWMutex
+	tokens    []tokenEntry
 	mux       *http.ServeMux
 	listeners []net.Listener
 	tcpAddr   string
@@ -32,20 +40,16 @@ func New(cfg ServerConfig) (*Server, error) {
 		log = slog.Default()
 	}
 
-	// Require explicit opt-in for unauthenticated TCP access.
-	if len(cfg.AuthTokens) == 0 && !cfg.AllowUnauthenticated && cfg.ListenTCP != "" {
-		return nil, fmt.Errorf("credproxy: AuthTokens is empty and AllowUnauthenticated is false; set AuthTokens or set AllowUnauthenticated=true for Unix-socket-only servers")
-	}
 
-	tokenBytes := make([][]byte, len(cfg.AuthTokens))
+	entries := make([]tokenEntry, len(cfg.AuthTokens))
 	for i, t := range cfg.AuthTokens {
-		tokenBytes[i] = []byte(t)
+		entries[i] = tokenEntry{token: []byte(t.Token), id: t.ID}
 	}
 
 	s := &Server{
 		cfg:    cfg,
 		log:    log,
-		tokens: tokenBytes,
+		tokens: entries,
 		mux:    http.NewServeMux(),
 	}
 
@@ -64,6 +68,29 @@ func New(cfg ServerConfig) (*Server, error) {
 // Addr returns the resolved TCP listen address (e.g. "127.0.0.1:PORT").
 // Useful when ListenTCP was "127.0.0.1:0" (ephemeral port).
 func (s *Server) Addr() string { return s.tcpAddr }
+
+// AddAuthToken registers a bearer token with the given id.
+// Idempotent: an existing entry with the same id is replaced.
+// Safe for concurrent use; may be called after New() to register tokens dynamically.
+func (s *Server) AddAuthToken(token, id string) {
+	entry := tokenEntry{token: []byte(token), id: id}
+	s.tokensMu.Lock()
+	defer s.tokensMu.Unlock()
+	for i, e := range s.tokens {
+		if e.id == id {
+			s.tokens[i] = entry
+			return
+		}
+	}
+	s.tokens = append(s.tokens, entry)
+}
+
+func (s *Server) tokenCount() int {
+	s.tokensMu.RLock()
+	n := len(s.tokens)
+	s.tokensMu.RUnlock()
+	return n
+}
 
 // Handler returns the underlying http.Handler (useful for testing without listeners).
 func (s *Server) Handler() http.Handler { return s.mux }

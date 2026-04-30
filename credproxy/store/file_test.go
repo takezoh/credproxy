@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/takezoh/credproxy/pkg/credproxy/store"
+	"github.com/takezoh/credproxy/credproxy/store"
 )
 
 func TestFileStore_SaveLoad(t *testing.T) {

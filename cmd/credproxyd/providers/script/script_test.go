@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/takezoh/credproxy/cmd/credproxyd/providers/script"
-	"github.com/takezoh/credproxy/pkg/credproxy"
+	"github.com/takezoh/credproxy/credproxy"
 )
 
 func writeScript(t *testing.T, content string) []string {

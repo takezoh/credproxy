@@ -13,7 +13,7 @@ The core invariant: **the library contains no provider knowledge**. Anthropic OA
 ```go
 srv, err := credproxy.New(credproxy.ServerConfig{
     ListenTCP:  "127.0.0.1:0",   // ephemeral port
-    AuthTokens: []string{token},
+    AuthTokens: []credproxy.TokenAuth{{Token: token, ID: "client-1"}},
     Routes: []credproxy.Route{
         {Path: "/anthropic", Upstream: "https://api.anthropic.com",
          Provider: myAnthropicProvider, RefreshOnStatus: []int{401}, StripInboundAuth: true},
@@ -38,7 +38,7 @@ systemd/launchd ── credproxyd (127.0.0.1:9787 + Unix socket)
 
 ## Design Principles
 
-- **Provider-agnostic core**: `pkg/credproxy` contains no Anthropic, AWS, or git-specific logic
+- **Provider-agnostic core**: the `credproxy` package contains no Anthropic, AWS, or git-specific logic
 - **Provider interface**: callers implement `Get(ctx, Request) (*Injection, error)` and `Refresh(ctx, Request) (*Injection, error)`. Caching is the Provider's responsibility
 - **Functional core / imperative shell**: credential injection decisions (`decideAction`, `planRequest`, `needsRefresh`) are pure functions; HTTP I/O and subprocess execution are thin shells over them
 - **Streaming first**: `httputil.ReverseProxy.ModifyResponse` detects refresh-triggering status codes at header receipt time; response bodies stream transparently without buffering
@@ -128,28 +128,30 @@ Rules:
 ## Package Layout
 
 ```
-pkg/credproxy/          Library — Provider/Store interfaces, Server, Route handler
+credproxy/              HTTP proxy core — Provider/Store interfaces, Server, Route handler
   types.go              Provider, Request, Injection, Route, ServerConfig, Store interfaces
   server.go             Server — TCP + Unix socket listeners, lifecycle (effectful shell)
   auth.go               authMiddleware + pure extractBearer / matchToken
   inject.go             decideAction / planRequest / needsRefresh (pure core)
   route.go              routeHandler — ModifyResponse/ErrorHandler-based refresh retry
-  store/
-    file.go             FileStore — atomic file-backed Store implementation
+  store/file.go         FileStore — atomic file-backed Store implementation
+container/              Container-injection abstraction
+  spec.go               Spec{Env, Mounts} — per-launch contribution
+  provider.go           Provider interface (Name/Init/Routes/ContainerSpec)
+  runhash.go            ProjectRunHash — stable per-project run-dir name
+providers/              Pre-built container.Provider implementations
+  awssso/               AWS SSO via credential_process + HTTP route
+  gcloudcli/            Synthetic CLOUDSDK_CONFIG + host-refreshed access token
+  sshagent/             Per-project ephemeral ssh-agent
 cmd/credproxyd/         Shared daemon binary (hook script users)
   main.go               flag parse, signal handling, credproxy.New + Run
-  config/
-    config.go           Load / LoadTokens (effectful shell)
-    expand.go           expand(Config, envFuncs) Config (pure)
-    validate.go         validate(Config) error (pure)
-  providers/script/
-    script.go           Provider — subprocess shell
-    parse.go            parseHookResponse(stdout, now, safety) (pure)
-    hookreq.go          buildHookRequest(action, route, req) (pure)
-    cache.go            ttlCache with singleflight de-duplication
+  config/               Load / expand (pure) / validate (pure)
+  providers/script/     Subprocess shell + ttlCache + singleflight
 hooks/                  Reference hook scripts (bash + curl + jq + aws CLI)
 packaging/              systemd unit, launchd plist
 ```
+
+The `container` package and the `providers/` tree are independent of the HTTP proxy core: a provider may register HTTP `Routes()` (awssso) or use bind-mounts only (gcloudcli, sshagent).
 
 ## Client Integration
 

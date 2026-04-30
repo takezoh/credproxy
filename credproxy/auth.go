@@ -1,10 +1,14 @@
 package credproxy
 
 import (
+	"context"
 	"crypto/subtle"
 	"net/http"
 	"strings"
 )
+
+// tokenIDKey is the context key for the authenticated token's identifier.
+type tokenIDKey struct{}
 
 // extractBearer extracts the bearer token from a slice of Authorization header values.
 // Returns ("", false) if the header is absent, empty, has multiple values, or does not
@@ -24,28 +28,41 @@ func extractBearer(values []string) (string, bool) {
 	return token, true
 }
 
-// matchToken reports whether presented matches any token in the set.
+// matchTokenEntries returns the id of the first entry whose token matches presented.
 // All comparisons use constant-time byte equality to reduce timing side-channels.
-func matchToken(tokens [][]byte, presented []byte) bool {
-	for _, t := range tokens {
-		if subtle.ConstantTimeCompare(t, presented) == 1 {
-			return true
+func matchTokenEntries(entries []tokenEntry, presented []byte) (id string, ok bool) {
+	for _, e := range entries {
+		if subtle.ConstantTimeCompare(e.token, presented) == 1 {
+			return e.id, true
 		}
 	}
-	return false
+	return "", false
+}
+
+// matchToken returns the id of the matching token entry, holding the read lock during comparison.
+func (s *Server) matchToken(presented []byte) (id string, ok bool) {
+	s.tokensMu.RLock()
+	defer s.tokensMu.RUnlock()
+	return matchTokenEntries(s.tokens, presented)
 }
 
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.cfg.AllowUnauthenticated || len(s.tokens) == 0 {
+		if s.cfg.AllowUnauthenticated || s.tokenCount() == 0 {
 			next.ServeHTTP(w, r)
 			return
 		}
 		token, ok := extractBearer(r.Header.Values("Authorization"))
-		if !ok || !matchToken(s.tokens, []byte(token)) {
+		if !ok {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		next.ServeHTTP(w, r)
+		id, matched := s.matchToken([]byte(token))
+		if !matched {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		ctx := context.WithValue(r.Context(), tokenIDKey{}, id)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
