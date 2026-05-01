@@ -19,8 +19,8 @@ import (
 type GCPConfig struct {
 	Account        string
 	ServiceAccount string
-	Active         string   // active project (required); written to active_config
-	Projects       []string // project list for SA mode; unused in user-account mode
+	Active         string   // required; written to active_config
+	Projects       []string // SA mode only
 }
 
 // Config holds path configuration for the gcloudcli spec builder.
