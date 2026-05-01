@@ -17,10 +17,10 @@ import (
 
 // GCPConfig holds per-project GCP configuration.
 type GCPConfig struct {
-	Account          string
-	ServiceAccount   string
-	Projects         []string
-	EnableUserAccount bool // allow empty ServiceAccount; project boundary not enforced
+	Account        string
+	ServiceAccount string
+	Active         string   // active project (required); written to active_config
+	Projects       []string // project list for SA mode; unused in user-account mode
 }
 
 // Config holds path configuration for the gcloudcli spec builder.
@@ -73,20 +73,32 @@ func (b *SpecBuilder) Routes() []credproxylib.Route { return nil }
 
 // ContainerSpec implements container.Provider.
 // Returns zero Spec when gcpFor returns no configuration for projectPath.
+// Both account and active are required when any GCP field is set.
+// SA mode is activated by setting ServiceAccount; user-account mode is the default.
 func (b *SpecBuilder) ContainerSpec(ctx context.Context, projectPath string) (container.Spec, error) {
 	gcp := b.gcpFor(projectPath)
 	account := gcp.Account
 	sa := gcp.ServiceAccount
-	projects := gcp.Projects
+	active := gcp.Active
 
-	if sa == "" && account == "" && len(projects) == 0 {
+	if account == "" && active == "" && sa == "" && len(gcp.Projects) == 0 {
 		return container.Spec{}, nil
 	}
-	if sa == "" && !gcp.EnableUserAccount {
-		return container.Spec{}, fmt.Errorf("gcloudcli: service_account required (set allow_user_account = true to use user-account proxy)")
+	if account == "" {
+		return container.Spec{}, fmt.Errorf("gcloudcli: account is required")
 	}
-	if len(projects) == 0 {
-		return container.Spec{}, fmt.Errorf("gcloudcli: projects must be set")
+	if active == "" {
+		return container.Spec{}, fmt.Errorf("gcloudcli: active is required")
+	}
+
+	var projects []string
+	if sa != "" {
+		projects = gcp.Projects
+		if len(projects) == 0 {
+			return container.Spec{}, fmt.Errorf("gcloudcli: projects must be set when service_account is configured")
+		}
+	} else {
+		projects = []string{active}
 	}
 
 	tokenSrc, err := b.ensureRefresher(ctx, account, sa)
@@ -110,7 +122,7 @@ func (b *SpecBuilder) ContainerSpec(ctx context.Context, projectPath string) (co
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		return container.Spec{}, fmt.Errorf("gcloudcli: mkdir config dir: %w", err)
 	}
-	if err := WriteConfigDir(configDir, cmp.Or(sa, account), projects, tokenContainerPath); err != nil {
+	if err := WriteConfigDir(configDir, cmp.Or(sa, account), active, projects, tokenContainerPath); err != nil {
 		return container.Spec{}, fmt.Errorf("gcloudcli: write config dir: %w", err)
 	}
 

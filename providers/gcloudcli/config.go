@@ -23,10 +23,10 @@ const OAuthAccessTokenEnv = "GOOGLE_OAUTH_ACCESS_TOKEN"
 const globalProperties = "[core]\ndisable_usage_reporting = true\n\n[component_manager]\ndisable_update_check = true\n"
 
 // WriteConfigDir materializes a synthetic CLOUDSDK_CONFIG directory at dir.
-// One gcloud configuration named after each project ID is written; the first
-// project becomes the active configuration. Each configuration sets
-// auth/access_token_file to tokenContainerPath.
-func WriteConfigDir(dir, account string, projects []string, tokenContainerPath string) error {
+// One gcloud configuration named after each project ID is written. active names
+// the configuration that becomes the active default (written to active_config).
+// Each configuration sets auth/access_token_file to tokenContainerPath.
+func WriteConfigDir(dir, account, active string, projects []string, tokenContainerPath string) error {
 	configsDir := filepath.Join(dir, "configurations")
 	if err := os.MkdirAll(configsDir, 0o755); err != nil {
 		return fmt.Errorf("gcloudcli: mkdir configurations: %w", err)
@@ -47,7 +47,7 @@ func WriteConfigDir(dir, account string, projects []string, tokenContainerPath s
 	}
 
 	activeConfig := filepath.Join(dir, "active_config")
-	if err := os.WriteFile(activeConfig, []byte(projects[0]), 0o644); err != nil {
+	if err := os.WriteFile(activeConfig, []byte(active), 0o644); err != nil {
 		return fmt.Errorf("gcloudcli: write active_config: %w", err)
 	}
 	return nil

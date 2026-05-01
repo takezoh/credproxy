@@ -33,25 +33,40 @@ func TestSpecBuilder_emptyConfig_zeroSpec(t *testing.T) {
 	}
 }
 
-func TestSpecBuilder_accountOnly_noAllowFlag_returnsError(t *testing.T) {
+func TestSpecBuilder_missingAccount_returnsError(t *testing.T) {
 	cfg := newTestConfig(t)
 	b := NewSpecBuilder(context.Background(), cfg, func(string) GCPConfig {
-		return GCPConfig{Account: "user@example.com", Projects: []string{"p"}}
+		return GCPConfig{Active: "proj-x"}
 	})
 	_, err := b.ContainerSpec(context.Background(), "/proj")
 	if err == nil {
-		t.Fatal("expected error for account-only config without allow_user_account, got nil")
+		t.Fatal("expected error when account is missing, got nil")
 	}
 }
 
-func TestSpecBuilder_missingServiceAccount_projectsOnly_returnsError(t *testing.T) {
+func TestSpecBuilder_missingActive_returnsError(t *testing.T) {
 	cfg := newTestConfig(t)
 	b := NewSpecBuilder(context.Background(), cfg, func(string) GCPConfig {
-		return GCPConfig{Projects: []string{"p"}}
+		return GCPConfig{Account: "user@example.com"}
 	})
 	_, err := b.ContainerSpec(context.Background(), "/proj")
 	if err == nil {
-		t.Fatal("expected error when service_account is missing and allow_user_account is false")
+		t.Fatal("expected error when active is missing, got nil")
+	}
+}
+
+func TestSpecBuilder_SAMode_missingProjects_returnsError(t *testing.T) {
+	cfg := newTestConfig(t)
+	b := NewSpecBuilder(context.Background(), cfg, func(string) GCPConfig {
+		return GCPConfig{
+			Account:        "user@example.com",
+			ServiceAccount: "sa@proj.iam.gserviceaccount.com",
+			Active:         "proj-x",
+		}
+	})
+	_, err := b.ContainerSpec(context.Background(), "/proj")
+	if err == nil {
+		t.Fatal("expected error when SA mode has no projects, got nil")
 	}
 }
 
@@ -60,9 +75,8 @@ func TestSpecBuilder_userAccountProxy_injectsEnvAndFiles(t *testing.T) {
 	cfg := newTestConfig(t)
 	b := NewSpecBuilder(context.Background(), cfg, func(string) GCPConfig {
 		return GCPConfig{
-			Account:          "user@example.com",
-			Projects:         []string{"proj-x"},
-			EnableUserAccount: true,
+			Account: "user@example.com",
+			Active:  "proj-x",
 		}
 	})
 
@@ -90,9 +104,8 @@ func TestSpecBuilder_userAccountProxy_configContainsUserAccount(t *testing.T) {
 	cfg := newTestConfig(t)
 	b := NewSpecBuilder(context.Background(), cfg, func(string) GCPConfig {
 		return GCPConfig{
-			Account:          "user@example.com",
-			Projects:         []string{"proj-x"},
-			EnableUserAccount: true,
+			Account: "user@example.com",
+			Active:  "proj-x",
 		}
 	})
 
@@ -111,14 +124,27 @@ func TestSpecBuilder_userAccountProxy_configContainsUserAccount(t *testing.T) {
 	}
 }
 
-func TestSpecBuilder_userAccountProxy_noProjects_returnsError(t *testing.T) {
+func TestSpecBuilder_userAccountProxy_activeIsOnlyProject(t *testing.T) {
+	stubGcloudForSpec(t, "user-token")
 	cfg := newTestConfig(t)
 	b := NewSpecBuilder(context.Background(), cfg, func(string) GCPConfig {
-		return GCPConfig{Account: "user@example.com", EnableUserAccount: true}
+		return GCPConfig{Account: "user@example.com", Active: "general"}
 	})
-	_, err := b.ContainerSpec(context.Background(), "/proj")
-	if err == nil {
-		t.Fatal("expected error when projects is empty, got nil")
+
+	if _, err := b.ContainerSpec(context.Background(), "/myproject"); err != nil {
+		t.Fatalf("ContainerSpec: %v", err)
+	}
+
+	projectDir := filepath.Join(cfg.RunBase, container.ProjectRunHash("/myproject"))
+	active, err := os.ReadFile(filepath.Join(projectDir, "gcloud-config", "active_config"))
+	if err != nil {
+		t.Fatalf("read active_config: %v", err)
+	}
+	if string(active) != "general" {
+		t.Errorf("active_config = %q, want %q", string(active), "general")
+	}
+	if _, err := os.Stat(filepath.Join(projectDir, "gcloud-config", "configurations", "config_general")); err != nil {
+		t.Errorf("config_general not created: %v", err)
 	}
 }
 
@@ -129,6 +155,7 @@ func TestSpecBuilder_withConfig_injectsEnvAndFiles(t *testing.T) {
 		return GCPConfig{
 			ServiceAccount: "sa@proj.iam.gserviceaccount.com",
 			Account:        "user@example.com",
+			Active:         "proj-a",
 			Projects:       []string{"proj-a", "proj-b"},
 		}
 	})
@@ -158,6 +185,7 @@ func TestSpecBuilder_refresherDeduplication(t *testing.T) {
 	gcpCfg := GCPConfig{
 		ServiceAccount: "sa@proj.iam.gserviceaccount.com",
 		Account:        "user@example.com",
+		Active:         "p",
 		Projects:       []string{"p"},
 	}
 	b := NewSpecBuilder(context.Background(), cfg, func(string) GCPConfig { return gcpCfg })
@@ -182,8 +210,8 @@ func TestSpecBuilder_refresherIsolationByServiceAccount(t *testing.T) {
 	stubGcloudForSpec(t, "tok")
 	cfg := newTestConfig(t)
 
-	gcpCfg1 := GCPConfig{ServiceAccount: "sa-a@proj.iam.gserviceaccount.com", Account: "u@e.com", Projects: []string{"p"}}
-	gcpCfg2 := GCPConfig{ServiceAccount: "sa-b@proj.iam.gserviceaccount.com", Account: "u@e.com", Projects: []string{"p"}}
+	gcpCfg1 := GCPConfig{ServiceAccount: "sa-a@proj.iam.gserviceaccount.com", Account: "u@e.com", Active: "p", Projects: []string{"p"}}
+	gcpCfg2 := GCPConfig{ServiceAccount: "sa-b@proj.iam.gserviceaccount.com", Account: "u@e.com", Active: "p", Projects: []string{"p"}}
 
 	calls := 0
 	b := NewSpecBuilder(context.Background(), cfg, func(p string) GCPConfig {

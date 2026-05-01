@@ -10,7 +10,7 @@ import (
 func TestWriteConfigDir_createsFilesPerProject(t *testing.T) {
 	dir := t.TempDir()
 	tokenPath := "/opt/run/gcloud-token"
-	err := WriteConfigDir(dir, "user@example.com", []string{"proj-a", "proj-b"}, tokenPath)
+	err := WriteConfigDir(dir, "user@example.com", "proj-a", []string{"proj-a", "proj-b"}, tokenPath)
 	if err != nil {
 		t.Fatalf("WriteConfigDir: %v", err)
 	}
@@ -42,16 +42,31 @@ func TestWriteConfigDir_createsFilesPerProject(t *testing.T) {
 	}
 }
 
+func TestWriteConfigDir_activeIndependentOfProjectsOrder(t *testing.T) {
+	dir := t.TempDir()
+	err := WriteConfigDir(dir, "user@example.com", "proj-b", []string{"proj-a", "proj-b"}, "/tok")
+	if err != nil {
+		t.Fatalf("WriteConfigDir: %v", err)
+	}
+	active, err := os.ReadFile(filepath.Join(dir, "active_config"))
+	if err != nil {
+		t.Fatalf("read active_config: %v", err)
+	}
+	if string(active) != "proj-b" {
+		t.Errorf("active_config = %q, want %q", string(active), "proj-b")
+	}
+}
+
 func TestWriteConfigDir_rejectsInvalidProjectID(t *testing.T) {
 	dir := t.TempDir()
-	if err := WriteConfigDir(dir, "user@example.com", []string{"bad project!"}, "/tok"); err == nil {
+	if err := WriteConfigDir(dir, "user@example.com", "ok-project", []string{"bad project!"}, "/tok"); err == nil {
 		t.Fatal("expected error for invalid project id")
 	}
 }
 
 func TestWriteConfigDir_rejectsEmptyProjectID(t *testing.T) {
 	dir := t.TempDir()
-	if err := WriteConfigDir(dir, "user@example.com", []string{""}, "/tok"); err == nil {
+	if err := WriteConfigDir(dir, "user@example.com", "p", []string{""}, "/tok"); err == nil {
 		t.Fatal("expected error for empty project id")
 	}
 }
