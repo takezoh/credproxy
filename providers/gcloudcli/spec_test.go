@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/takezoh/credproxy/container"
@@ -32,14 +33,14 @@ func TestSpecBuilder_emptyConfig_zeroSpec(t *testing.T) {
 	}
 }
 
-func TestSpecBuilder_accountOnly_returnsError(t *testing.T) {
+func TestSpecBuilder_accountOnly_noAllowFlag_returnsError(t *testing.T) {
 	cfg := newTestConfig(t)
 	b := NewSpecBuilder(context.Background(), cfg, func(string) GCPConfig {
 		return GCPConfig{Account: "user@example.com", Projects: []string{"p"}}
 	})
 	_, err := b.ContainerSpec(context.Background(), "/proj")
 	if err == nil {
-		t.Fatal("expected error for account-only config without service_account, got nil")
+		t.Fatal("expected error for account-only config without allow_user_account, got nil")
 	}
 }
 
@@ -50,7 +51,74 @@ func TestSpecBuilder_missingServiceAccount_projectsOnly_returnsError(t *testing.
 	})
 	_, err := b.ContainerSpec(context.Background(), "/proj")
 	if err == nil {
-		t.Fatal("expected error when service_account is missing")
+		t.Fatal("expected error when service_account is missing and allow_user_account is false")
+	}
+}
+
+func TestSpecBuilder_userAccountProxy_injectsEnvAndFiles(t *testing.T) {
+	stubGcloudForSpec(t, "user-token")
+	cfg := newTestConfig(t)
+	b := NewSpecBuilder(context.Background(), cfg, func(string) GCPConfig {
+		return GCPConfig{
+			Account:          "user@example.com",
+			Projects:         []string{"proj-x"},
+			EnableUserAccount: true,
+		}
+	})
+
+	spec, err := b.ContainerSpec(context.Background(), "/myproject")
+	if err != nil {
+		t.Fatalf("ContainerSpec: %v", err)
+	}
+
+	wantConfigPath := cfg.ContainerRunDir + "/gcloud-config"
+	if spec.Env[ConfigDirEnv] != wantConfigPath {
+		t.Errorf("env[%s] = %q, want %q", ConfigDirEnv, spec.Env[ConfigDirEnv], wantConfigPath)
+	}
+
+	projectDir := filepath.Join(cfg.RunBase, container.ProjectRunHash("/myproject"))
+	if _, err := os.Stat(filepath.Join(projectDir, "gcloud-config")); err != nil {
+		t.Errorf("gcloud-config dir not created: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(projectDir, "gcloud-token")); err != nil {
+		t.Errorf("gcloud-token not created: %v", err)
+	}
+}
+
+func TestSpecBuilder_userAccountProxy_configContainsUserAccount(t *testing.T) {
+	stubGcloudForSpec(t, "user-token")
+	cfg := newTestConfig(t)
+	b := NewSpecBuilder(context.Background(), cfg, func(string) GCPConfig {
+		return GCPConfig{
+			Account:          "user@example.com",
+			Projects:         []string{"proj-x"},
+			EnableUserAccount: true,
+		}
+	})
+
+	if _, err := b.ContainerSpec(context.Background(), "/myproject"); err != nil {
+		t.Fatalf("ContainerSpec: %v", err)
+	}
+
+	projectDir := filepath.Join(cfg.RunBase, container.ProjectRunHash("/myproject"))
+	configFile := filepath.Join(projectDir, "gcloud-config", "configurations", "config_proj-x")
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		t.Fatalf("read config file: %v", err)
+	}
+	if !strings.Contains(string(data), "user@example.com") {
+		t.Errorf("config file does not contain user account; content:\n%s", data)
+	}
+}
+
+func TestSpecBuilder_userAccountProxy_noProjects_returnsError(t *testing.T) {
+	cfg := newTestConfig(t)
+	b := NewSpecBuilder(context.Background(), cfg, func(string) GCPConfig {
+		return GCPConfig{Account: "user@example.com", EnableUserAccount: true}
+	})
+	_, err := b.ContainerSpec(context.Background(), "/proj")
+	if err == nil {
+		t.Fatal("expected error when projects is empty, got nil")
 	}
 }
 

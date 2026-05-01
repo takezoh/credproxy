@@ -1,6 +1,7 @@
 package gcloudcli
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -16,9 +17,10 @@ import (
 
 // GCPConfig holds per-project GCP configuration.
 type GCPConfig struct {
-	Account        string
-	ServiceAccount string
-	Projects       []string
+	Account          string
+	ServiceAccount   string
+	Projects         []string
+	EnableUserAccount bool // allow empty ServiceAccount; project boundary not enforced
 }
 
 // Config holds path configuration for the gcloudcli spec builder.
@@ -80,8 +82,11 @@ func (b *SpecBuilder) ContainerSpec(ctx context.Context, projectPath string) (co
 	if sa == "" && account == "" && len(projects) == 0 {
 		return container.Spec{}, nil
 	}
-	if sa == "" || len(projects) == 0 {
-		return container.Spec{}, fmt.Errorf("gcloudcli: service_account and projects must both be set; full-scope account tokens are not supported")
+	if sa == "" && !gcp.EnableUserAccount {
+		return container.Spec{}, fmt.Errorf("gcloudcli: service_account required (set allow_user_account = true to use user-account proxy)")
+	}
+	if len(projects) == 0 {
+		return container.Spec{}, fmt.Errorf("gcloudcli: projects must be set")
 	}
 
 	tokenSrc, err := b.ensureRefresher(ctx, account, sa)
@@ -105,7 +110,7 @@ func (b *SpecBuilder) ContainerSpec(ctx context.Context, projectPath string) (co
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		return container.Spec{}, fmt.Errorf("gcloudcli: mkdir config dir: %w", err)
 	}
-	if err := WriteConfigDir(configDir, sa, projects, tokenContainerPath); err != nil {
+	if err := WriteConfigDir(configDir, cmp.Or(sa, account), projects, tokenContainerPath); err != nil {
 		return container.Spec{}, fmt.Errorf("gcloudcli: write config dir: %w", err)
 	}
 
