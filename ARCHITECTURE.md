@@ -136,17 +136,21 @@ credproxy/              HTTP proxy core — Provider/Store interfaces, Server, R
   route.go              routeHandler — ModifyResponse/ErrorHandler-based refresh retry
   store/file.go         FileStore — atomic file-backed Store implementation
 container/              Container-injection abstraction
-  spec.go               Spec{Env, Mounts} — per-launch contribution
+  spec.go               Spec{Env, Mounts, BridgeSpecs} — per-launch contribution
   provider.go           Provider interface (Name/Init/Routes/ContainerSpec)
   runhash.go            ProjectRunHash — stable per-project run-dir name
-providers/              Pre-built container.Provider implementations — see each package README
-  awssso/               AWS SSO via credential_process + HTTP route
-  gcloudcli/            Synthetic CLOUDSDK_CONFIG + host-refreshed access token
-  sshagent/             Per-project ephemeral ssh-agent
+bridge/                 Generic TCP↔unix socket forwarder (provider-agnostic)
+  bridge.go             Run(ctx, listenAddr, socketPath) — forwards TCP connections to a unix socket
 cmd/credproxyd/         Shared daemon binary (hook script users)
   main.go               flag parse, signal handling, credproxy.New + Run
   config/               Load / expand (pure) / validate (pure)
   providers/script/     Subprocess shell + ttlCache + singleflight
+cmd/sockbridge/         TCP↔unix bridge binary — used by providers that need an in-container TCP endpoint
+  main.go               -listen <addr> -socket <path>; wraps bridge.Run
+providers/              Pre-built container.Provider implementations — see each package README
+  awssso/               AWS SSO via credential_process + HTTP route
+  gcloudcli/            GCE metadata server emulator + synthetic CLOUDSDK_CONFIG; on-demand token fetch
+  sshagent/             Per-project ephemeral ssh-agent
 hooks/                  Reference hook scripts (bash + curl + jq + aws CLI)
 packaging/              systemd unit, launchd plist
 ```

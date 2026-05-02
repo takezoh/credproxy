@@ -13,7 +13,6 @@ import (
 func newTestConfig(t *testing.T) Config {
 	t.Helper()
 	return Config{
-		GCPDir:          t.TempDir(),
 		RunBase:         t.TempDir(),
 		ContainerRunDir: "/run/credproxy",
 	}
@@ -28,8 +27,8 @@ func TestSpecBuilder_emptyConfig_zeroSpec(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(spec.Env) != 0 || len(spec.Mounts) != 0 {
-		t.Errorf("expected zero spec, got env=%v mounts=%v", spec.Env, spec.Mounts)
+	if len(spec.Env) != 0 || len(spec.Mounts) != 0 || len(spec.BridgeSpecs) != 0 {
+		t.Errorf("expected zero spec, got env=%v mounts=%v bridges=%v", spec.Env, spec.Mounts, spec.BridgeSpecs)
 	}
 }
 
@@ -70,8 +69,7 @@ func TestSpecBuilder_SAMode_missingProjects_returnsError(t *testing.T) {
 	}
 }
 
-func TestSpecBuilder_userAccountProxy_injectsEnvAndFiles(t *testing.T) {
-	stubGcloudForSpec(t, "user-token")
+func TestSpecBuilder_userAccountProxy_injectsEnvAndBridgeSpec(t *testing.T) {
 	cfg := newTestConfig(t)
 	b := NewSpecBuilder(context.Background(), cfg, func(string) GCPConfig {
 		return GCPConfig{
@@ -89,18 +87,44 @@ func TestSpecBuilder_userAccountProxy_injectsEnvAndFiles(t *testing.T) {
 	if spec.Env[ConfigDirEnv] != wantConfigPath {
 		t.Errorf("env[%s] = %q, want %q", ConfigDirEnv, spec.Env[ConfigDirEnv], wantConfigPath)
 	}
+	if spec.Env[MetadataHostEnv] != metadataListenAddr {
+		t.Errorf("env[%s] = %q, want %q", MetadataHostEnv, spec.Env[MetadataHostEnv], metadataListenAddr)
+	}
+	if len(spec.BridgeSpecs) != 1 {
+		t.Fatalf("expected 1 BridgeSpec, got %d", len(spec.BridgeSpecs))
+	}
+	if spec.BridgeSpecs[0].ListenAddr != metadataListenAddr {
+		t.Errorf("BridgeSpec.ListenAddr = %q, want %q", spec.BridgeSpecs[0].ListenAddr, metadataListenAddr)
+	}
+	wantSock := cfg.ContainerRunDir + "/gcp-metadata.sock"
+	if spec.BridgeSpecs[0].ContainerSocketPath != wantSock {
+		t.Errorf("BridgeSpec.ContainerSocketPath = %q, want %q", spec.BridgeSpecs[0].ContainerSocketPath, wantSock)
+	}
+}
+
+func TestSpecBuilder_userAccountProxy_tokenPathInConfig(t *testing.T) {
+	cfg := newTestConfig(t)
+	b := NewSpecBuilder(context.Background(), cfg, func(string) GCPConfig {
+		return GCPConfig{Account: "user@example.com", Active: "proj-x"}
+	})
+
+	if _, err := b.ContainerSpec(context.Background(), "/myproject"); err != nil {
+		t.Fatalf("ContainerSpec: %v", err)
+	}
 
 	projectDir := filepath.Join(cfg.RunBase, container.ProjectRunHash("/myproject"))
-	if _, err := os.Stat(filepath.Join(projectDir, "gcloud-config")); err != nil {
-		t.Errorf("gcloud-config dir not created: %v", err)
+	configFile := filepath.Join(projectDir, "gcloud-config", "configurations", "config_proj-x")
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		t.Fatalf("read config file: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(projectDir, "gcloud-token")); err != nil {
-		t.Errorf("gcloud-token not created: %v", err)
+	wantTokenPath := cfg.ContainerRunDir + "/gcloud-token"
+	if !strings.Contains(string(data), wantTokenPath) {
+		t.Errorf("config missing access_token_file path %q; content:\n%s", wantTokenPath, data)
 	}
 }
 
 func TestSpecBuilder_userAccountProxy_configContainsUserAccount(t *testing.T) {
-	stubGcloudForSpec(t, "user-token")
 	cfg := newTestConfig(t)
 	b := NewSpecBuilder(context.Background(), cfg, func(string) GCPConfig {
 		return GCPConfig{
@@ -119,13 +143,16 @@ func TestSpecBuilder_userAccountProxy_configContainsUserAccount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read config file: %v", err)
 	}
-	if !strings.Contains(string(data), "user@example.com") {
-		t.Errorf("config file does not contain user account; content:\n%s", data)
+	content := string(data)
+	if !strings.Contains(content, "user@example.com") {
+		t.Errorf("config file does not contain user account; content:\n%s", content)
+	}
+	if !strings.Contains(content, "access_token_file") {
+		t.Errorf("config file must contain access_token_file; content:\n%s", content)
 	}
 }
 
 func TestSpecBuilder_userAccountProxy_activeIsOnlyProject(t *testing.T) {
-	stubGcloudForSpec(t, "user-token")
 	cfg := newTestConfig(t)
 	b := NewSpecBuilder(context.Background(), cfg, func(string) GCPConfig {
 		return GCPConfig{Account: "user@example.com", Active: "general"}
@@ -148,8 +175,7 @@ func TestSpecBuilder_userAccountProxy_activeIsOnlyProject(t *testing.T) {
 	}
 }
 
-func TestSpecBuilder_withConfig_injectsEnvAndFiles(t *testing.T) {
-	stubGcloudForSpec(t, "gcp-test-token")
+func TestSpecBuilder_withConfig_injectsEnvAndBridgeSpec(t *testing.T) {
 	cfg := newTestConfig(t)
 	b := NewSpecBuilder(context.Background(), cfg, func(string) GCPConfig {
 		return GCPConfig{
@@ -172,15 +198,38 @@ func TestSpecBuilder_withConfig_injectsEnvAndFiles(t *testing.T) {
 	if len(spec.Mounts) != 0 {
 		t.Errorf("expected 0 mounts, got %d: %v", len(spec.Mounts), spec.Mounts)
 	}
-
-	projectDir := filepath.Join(cfg.RunBase, container.ProjectRunHash("/myproject"))
-	if _, err := os.Stat(filepath.Join(projectDir, "gcloud-config")); err != nil {
-		t.Errorf("gcloud-config dir not created in run dir: %v", err)
+	if len(spec.BridgeSpecs) != 1 {
+		t.Errorf("expected 1 BridgeSpec, got %d", len(spec.BridgeSpecs))
 	}
 }
 
-func TestSpecBuilder_refresherDeduplication(t *testing.T) {
-	stubGcloudForSpec(t, "tok")
+func TestSpecBuilder_metadataServerDeduplication(t *testing.T) {
+	cfg := newTestConfig(t)
+	gcpCfg := GCPConfig{
+		ServiceAccount: "sa@proj.iam.gserviceaccount.com",
+		Account:        "user@example.com",
+		Active:         "p",
+		Projects:       []string{"p"},
+	}
+	b := NewSpecBuilder(context.Background(), cfg, func(string) GCPConfig { return gcpCfg })
+
+	if _, err := b.ContainerSpec(context.Background(), "/p1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.ContainerSpec(context.Background(), "/p1"); err != nil {
+		t.Fatal(err)
+	}
+
+	b.mu.Lock()
+	count := len(b.metaServers)
+	b.mu.Unlock()
+
+	if count != 1 {
+		t.Errorf("expected 1 metadata server for same project, got %d", count)
+	}
+}
+
+func TestSpecBuilder_metadataServerIsolationByProject(t *testing.T) {
 	cfg := newTestConfig(t)
 	gcpCfg := GCPConfig{
 		ServiceAccount: "sa@proj.iam.gserviceaccount.com",
@@ -198,53 +247,11 @@ func TestSpecBuilder_refresherDeduplication(t *testing.T) {
 	}
 
 	b.mu.Lock()
-	count := len(b.refreshers)
-	b.mu.Unlock()
-
-	if count != 1 {
-		t.Errorf("expected 1 refresher for same SA, got %d", count)
-	}
-}
-
-func TestSpecBuilder_refresherIsolationByServiceAccount(t *testing.T) {
-	stubGcloudForSpec(t, "tok")
-	cfg := newTestConfig(t)
-
-	gcpCfg1 := GCPConfig{ServiceAccount: "sa-a@proj.iam.gserviceaccount.com", Account: "u@e.com", Active: "p", Projects: []string{"p"}}
-	gcpCfg2 := GCPConfig{ServiceAccount: "sa-b@proj.iam.gserviceaccount.com", Account: "u@e.com", Active: "p", Projects: []string{"p"}}
-
-	calls := 0
-	b := NewSpecBuilder(context.Background(), cfg, func(p string) GCPConfig {
-		calls++
-		if p == "/p1" {
-			return gcpCfg1
-		}
-		return gcpCfg2
-	})
-
-	if _, err := b.ContainerSpec(context.Background(), "/p1"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := b.ContainerSpec(context.Background(), "/p2"); err != nil {
-		t.Fatal(err)
-	}
-
-	b.mu.Lock()
-	count := len(b.refreshers)
+	count := len(b.metaServers)
 	b.mu.Unlock()
 
 	if count != 2 {
-		t.Errorf("expected 2 refreshers for different SAs, got %d", count)
+		t.Errorf("expected 2 metadata servers for different projects, got %d", count)
 	}
 }
 
-func stubGcloudForSpec(t *testing.T, token string) {
-	t.Helper()
-	dir := t.TempDir()
-	script := filepath.Join(dir, "gcloud")
-	content := "#!/bin/sh\necho " + token + "\n"
-	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
-		t.Fatalf("write stub gcloud: %v", err)
-	}
-	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
-}

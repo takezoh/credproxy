@@ -9,7 +9,7 @@ import (
 
 func TestWriteConfigDir_createsFilesPerProject(t *testing.T) {
 	dir := t.TempDir()
-	tokenPath := "/opt/run/gcloud-token"
+	tokenPath := "/run/credproxy/gcloud-token"
 	err := WriteConfigDir(dir, "user@example.com", "proj-a", []string{"proj-a", "proj-b"}, tokenPath)
 	if err != nil {
 		t.Fatalf("WriteConfigDir: %v", err)
@@ -22,8 +22,11 @@ func TestWriteConfigDir_createsFilesPerProject(t *testing.T) {
 			t.Fatalf("read %s: %v", path, err)
 		}
 		content := string(data)
-		if !strings.Contains(content, tokenPath) {
+		if !strings.Contains(content, "access_token_file") {
 			t.Errorf("%s: missing access_token_file line", proj)
+		}
+		if !strings.Contains(content, tokenPath) {
+			t.Errorf("%s: missing token path %q", proj, tokenPath)
 		}
 		if !strings.Contains(content, "user@example.com") {
 			t.Errorf("%s: missing account line", proj)
@@ -44,7 +47,7 @@ func TestWriteConfigDir_createsFilesPerProject(t *testing.T) {
 
 func TestWriteConfigDir_activeIndependentOfProjectsOrder(t *testing.T) {
 	dir := t.TempDir()
-	err := WriteConfigDir(dir, "user@example.com", "proj-b", []string{"proj-a", "proj-b"}, "/tok")
+	err := WriteConfigDir(dir, "user@example.com", "proj-b", []string{"proj-a", "proj-b"}, "")
 	if err != nil {
 		t.Fatalf("WriteConfigDir: %v", err)
 	}
@@ -59,14 +62,14 @@ func TestWriteConfigDir_activeIndependentOfProjectsOrder(t *testing.T) {
 
 func TestWriteConfigDir_rejectsInvalidProjectID(t *testing.T) {
 	dir := t.TempDir()
-	if err := WriteConfigDir(dir, "user@example.com", "ok-project", []string{"bad project!"}, "/tok"); err == nil {
+	if err := WriteConfigDir(dir, "user@example.com", "ok-project", []string{"bad project!"}, ""); err == nil {
 		t.Fatal("expected error for invalid project id")
 	}
 }
 
 func TestWriteConfigDir_rejectsEmptyProjectID(t *testing.T) {
 	dir := t.TempDir()
-	if err := WriteConfigDir(dir, "user@example.com", "p", []string{""}, "/tok"); err == nil {
+	if err := WriteConfigDir(dir, "user@example.com", "p", []string{""}, ""); err == nil {
 		t.Fatal("expected error for empty project id")
 	}
 }
@@ -76,5 +79,11 @@ func TestContainerEnv_containsCloudsdkConfig(t *testing.T) {
 	env := ContainerEnv(configPath)
 	if env[ConfigDirEnv] != configPath {
 		t.Errorf("ContainerEnv()[%q] = %q, want %q", ConfigDirEnv, env[ConfigDirEnv], configPath)
+	}
+	if env[MetadataHostEnv] != metadataListenAddr {
+		t.Errorf("ContainerEnv()[%q] = %q, want %q", MetadataHostEnv, env[MetadataHostEnv], metadataListenAddr)
+	}
+	if env[MetadataIPEnv] != "127.0.0.1" {
+		t.Errorf("ContainerEnv()[%q] = %q, want %q", MetadataIPEnv, env[MetadataIPEnv], "127.0.0.1")
 	}
 }

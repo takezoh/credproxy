@@ -1,14 +1,14 @@
 // Package gcloudcli provides credential isolation for the gcloud CLI in Docker containers.
 //
 // Instead of bind-mounting ~/.config/gcloud, this provider writes a synthetic CLOUDSDK_CONFIG
-// directory containing per-project gcloud configurations. Each configuration uses
-// auth/access_token_file pointing to a host-refreshed token file.
-// Containers receive only short-lived access tokens (≤1h TTL).
+// directory containing per-project gcloud configurations. A per-project GCE metadata server
+// emulator is started on the host and exposed to the container via a unix socket + TCP bridge,
+// allowing the container's gcloud / Google SDKs to obtain fresh tokens on demand without
+// any token file management or expiry timers.
 package gcloudcli
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,15 +17,18 @@ import (
 // ConfigDirEnv is the gcloud SDK environment variable that overrides ~/.config/gcloud.
 const ConfigDirEnv = "CLOUDSDK_CONFIG"
 
-// OAuthAccessTokenEnv is the env var gcloud (all versions) checks for a raw access token.
-const OAuthAccessTokenEnv = "GOOGLE_OAUTH_ACCESS_TOKEN"
+// MetadataHostEnv is the env var that redirects GCE metadata requests to a custom host:port.
+const MetadataHostEnv = "GCE_METADATA_HOST"
+
+// MetadataIPEnv aligns the Python google-auth library's metadata IP with GCE_METADATA_HOST.
+const MetadataIPEnv = "GCE_METADATA_IP"
 
 const globalProperties = "[core]\ndisable_usage_reporting = true\n\n[component_manager]\ndisable_update_check = true\n"
 
 // WriteConfigDir materializes a synthetic CLOUDSDK_CONFIG directory at dir.
 // One gcloud configuration named after each project ID is written. active names
 // the configuration that becomes the active default (written to active_config).
-// Each configuration sets auth/access_token_file to tokenContainerPath.
+// tokenContainerPath is the container-side path of the access token file (used by gcloud CLI).
 func WriteConfigDir(dir, account, active string, projects []string, tokenContainerPath string) error {
 	configsDir := filepath.Join(dir, "configurations")
 	if err := os.MkdirAll(configsDir, 0o755); err != nil {
@@ -55,10 +58,12 @@ func WriteConfigDir(dir, account, active string, projects []string, tokenContain
 
 func writeConfigFile(path, account, project, tokenContainerPath string) error {
 	var sb strings.Builder
-	sb.WriteString("[auth]\n")
-	sb.WriteString("access_token_file = ")
-	sb.WriteString(tokenContainerPath)
-	sb.WriteString("\n\n[core]\n")
+	if tokenContainerPath != "" {
+		sb.WriteString("[auth]\naccess_token_file = ")
+		sb.WriteString(tokenContainerPath)
+		sb.WriteString("\n\n")
+	}
+	sb.WriteString("[core]\n")
 	if account != "" {
 		sb.WriteString("account = ")
 		sb.WriteString(account)
@@ -72,18 +77,13 @@ func writeConfigFile(path, account, project, tokenContainerPath string) error {
 	return os.WriteFile(path, []byte(sb.String()), 0o644)
 }
 
-// RenderConfig writes the gcloud configuration ini file to w (for testing).
-func RenderConfig(w io.Writer, account, project, tokenContainerPath string) error {
-	_, err := fmt.Fprintf(w, "[auth]\naccess_token_file = %s\n\n[core]\naccount = %s\nproject = %s\n",
-		tokenContainerPath, account, project)
-	return err
-}
-
 // ContainerEnv returns the env vars to inject into the container.
 // configContainerPath is the container-side CLOUDSDK_CONFIG directory path.
 func ContainerEnv(configContainerPath string) map[string]string {
 	return map[string]string{
-		ConfigDirEnv: configContainerPath,
+		ConfigDirEnv:    configContainerPath,
+		MetadataHostEnv: metadataListenAddr,
+		MetadataIPEnv:   "127.0.0.1",
 	}
 }
 
