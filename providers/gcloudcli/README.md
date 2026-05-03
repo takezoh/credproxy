@@ -1,6 +1,6 @@
 # gcloudcli
 
-gcloud CLI credential isolation for containers. `~/.config/gcloud` (including the OAuth refresh token) is never bind-mounted. Instead the container reaches a GCE metadata server emulator running on the host, which calls `gcloud auth print-access-token` on demand and returns fresh short-lived tokens each time they are needed.
+gcloud CLI credential isolation for containers. `~/.config/gcloud` (including the OAuth refresh token) is never bind-mounted. Instead the container reaches a GCE metadata server emulator running on the host, which calls `gcloud auth application-default print-access-token` (user-account mode) or `gcloud auth print-access-token --impersonate-service-account` (SA mode) on demand and returns fresh short-lived tokens each time they are needed.
 
 ## Configuration
 
@@ -16,6 +16,14 @@ gcloud CLI credential isolation for containers. `~/.config/gcloud` (including th
 **Mode selection** is automatic: `ServiceAccount` non-empty → SA mode; empty → user-account mode.
 
 In user-account mode `Projects` is ignored; the synthetic config contains a single configuration for `Active`.
+
+**Host prerequisite (user-account mode):** the host must have Application Default Credentials set up:
+
+```sh
+gcloud auth application-default login
+```
+
+`gcloud auth login` alone is not sufficient — it does not create ADC credentials. ADC credentials are required because user-account mode calls `gcloud auth application-default print-access-token`, which produces a token accepted by all Google APIs including Cloud Run.
 
 ## How it works
 
@@ -56,15 +64,14 @@ sockbridge -listen 127.0.0.1:8181 -socket /opt/roost/run/gcp-metadata.sock &
 
 ## Token refresh
 
-Tokens are fetched **on demand** when the metadata server's `/computeMetadata/v1/instance/service-accounts/default/token` endpoint is called:
+Tokens are fetched **on demand** when the metadata server's `/computeMetadata/v1/instance/service-accounts/default/token` endpoint is called.
 
-```
-gcloud auth print-access-token [--account=<account>] [--impersonate-service-account=<sa>]
-```
+- **User-account mode:** `gcloud auth application-default print-access-token` — uses ADC credentials stored at `~/.config/gcloud/application_default_credentials.json` on the host. The resulting token has an audience accepted by all Google APIs including Cloud Run RunJob.
+- **SA mode:** `gcloud auth print-access-token [--account=<account>] --impersonate-service-account=<sa>` — uses the host account to generate an impersonation token for the specified SA.
 
 `gcloud` auto-refreshes its own stored credentials via the host refresh token — no polling or expiry timer is needed. Token TTL in the metadata response is reported as 1800 seconds (a conservative value; clients use this for cache TTL).
 
-The gcloud CLI reads `access_token_file` directly and therefore bypasses the metadata server. Both paths ultimately call `gcloud auth print-access-token` on the host, so they always return a valid (auto-refreshed) token.
+The gcloud CLI reads `access_token_file` directly and therefore bypasses the metadata server. Both paths ultimately call the same host-side gcloud command, so they always return a valid (auto-refreshed) token of the correct type.
 
 ## Metadata server endpoints
 

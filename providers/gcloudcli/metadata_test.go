@@ -86,6 +86,45 @@ func TestMetadataHandler_projectEndpoint(t *testing.T) {
 	}
 }
 
+func TestBuildPrintAccessTokenArgs(t *testing.T) {
+	tests := []struct {
+		name           string
+		account        string
+		serviceAccount string
+		wantArgs       []string
+	}{
+		{
+			name:     "user-account mode uses ADC command",
+			account:  "user@example.com",
+			wantArgs: []string{"auth", "application-default", "print-access-token"},
+		},
+		{
+			name:           "SA mode with account uses impersonation",
+			account:        "user@example.com",
+			serviceAccount: "sa@proj.iam.gserviceaccount.com",
+			wantArgs:       []string{"auth", "print-access-token", "--account=user@example.com", "--impersonate-service-account=sa@proj.iam.gserviceaccount.com"},
+		},
+		{
+			name:           "SA mode without account omits account flag",
+			serviceAccount: "sa@proj.iam.gserviceaccount.com",
+			wantArgs:       []string{"auth", "print-access-token", "--impersonate-service-account=sa@proj.iam.gserviceaccount.com"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := buildPrintAccessTokenArgs(tc.account, tc.serviceAccount)
+			if len(got) != len(tc.wantArgs) {
+				t.Fatalf("args = %v, want %v", got, tc.wantArgs)
+			}
+			for i := range got {
+				if got[i] != tc.wantArgs[i] {
+					t.Errorf("args[%d] = %q, want %q", i, got[i], tc.wantArgs[i])
+				}
+			}
+		})
+	}
+}
+
 func TestMetadataHandler_tokenEndpoint_impersonatesSA(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "gcloud")

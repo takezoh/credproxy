@@ -84,16 +84,26 @@ func checkFlavor(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func gcpPrintAccessToken(ctx context.Context, account, serviceAccount string) (string, error) {
-	args := []string{"auth", "print-access-token"}
-	if account != "" {
-		args = append(args, "--account="+account)
-	}
-	if serviceAccount != "" {
-		args = append(args, "--impersonate-service-account="+serviceAccount)
-	}
+	args := buildPrintAccessTokenArgs(account, serviceAccount)
 	out, err := exec.CommandContext(ctx, "gcloud", args...).Output()
 	if err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// buildPrintAccessTokenArgs returns gcloud args for printing an access token.
+// SA mode uses print-access-token + impersonation; user-account mode uses
+// application-default print-access-token to obtain an ADC token (audience =
+// Google auth library client) accepted by APIs such as Cloud Run RunJob.
+func buildPrintAccessTokenArgs(account, serviceAccount string) []string {
+	if serviceAccount != "" {
+		args := []string{"auth", "print-access-token"}
+		if account != "" {
+			args = append(args, "--account="+account)
+		}
+		args = append(args, "--impersonate-service-account="+serviceAccount)
+		return args
+	}
+	return []string{"auth", "application-default", "print-access-token"}
 }
