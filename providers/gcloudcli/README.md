@@ -44,7 +44,7 @@ gcloud auth application-default login
 
 - **`gcp-metadata.sock`** — unix socket the host-side metadata server listens on. Exposed to the container as `ContainerRunDir/gcp-metadata.sock` via the per-project bind-mount.
 - **`gcloud-config/`** — synthetic `CLOUDSDK_CONFIG` directory. One `configurations/config_<project>` per entry in `Projects` (or just `Active` in user-account mode). `active_config` contains the value of `Active`. Each configuration sets `[core] account` and `[auth] access_token_file` (for the gcloud CLI) pointing to the container-side token path.
-- **`gcloud-token`** — token file pre-populated at metadata server startup and updated on each `/token` request. Read by the gcloud CLI via `access_token_file`; kept current by the metadata server so gcloud CLI and Google SDKs see consistent credentials.
+- **`gcloud-token`** — token file pre-populated at metadata server startup, refreshed by the periodic scheduler every 25 minutes, and updated on each `/token` request. Read by the gcloud CLI via `access_token_file`; Google SDKs use the metadata server directly.
 
 Container env vars injected:
 
@@ -64,14 +64,17 @@ sockbridge -listen 127.0.0.1:8181 -socket /opt/roost/run/gcp-metadata.sock &
 
 ## Token refresh
 
-Tokens are fetched **on demand** when the metadata server's `/computeMetadata/v1/instance/service-accounts/default/token` endpoint is called.
+Two delivery paths exist; both ultimately call the same host-side gcloud command:
 
-- **User-account mode:** `gcloud auth application-default print-access-token` — uses ADC credentials stored at `~/.config/gcloud/application_default_credentials.json` on the host. The resulting token has an audience accepted by all Google APIs including Cloud Run RunJob.
-- **SA mode:** `gcloud auth print-access-token [--account=<account>] --impersonate-service-account=<sa>` — uses the host account to generate an impersonation token for the specified SA.
+- **Metadata server** (`/computeMetadata/v1/.../token`) — called by Google SDKs on demand. The response also rewrites `gcloud-token` so the file stays current.
+- **`gcloud-token` file** — read directly by the gcloud CLI via `access_token_file`. Refreshed proactively every 25 minutes by the credproxy periodic scheduler (all registered projects in parallel) so it is always valid regardless of CLI invocation frequency.
 
-`gcloud` auto-refreshes its own stored credentials via the host refresh token — no polling or expiry timer is needed. Token TTL in the metadata response is reported as 1800 seconds (a conservative value; clients use this for cache TTL).
+Token source by mode:
 
-The gcloud CLI reads `access_token_file` directly and therefore bypasses the metadata server. Both paths ultimately call the same host-side gcloud command, so they always return a valid (auto-refreshed) token of the correct type.
+- **User-account:** `gcloud auth application-default print-access-token` — ADC credentials on the host; token accepted by all Google APIs including Cloud Run RunJob.
+- **SA mode:** `gcloud auth print-access-token [--account=<account>] --impersonate-service-account=<sa>` — host account generates an impersonation token for the SA.
+
+`gcloud` auto-refreshes its own stored credentials on the host via the host refresh token. Token TTL in the metadata response is reported as 1800 seconds (a conservative value; clients use this for cache TTL).
 
 ## Metadata server endpoints
 

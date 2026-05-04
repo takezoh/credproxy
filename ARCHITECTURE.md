@@ -130,14 +130,14 @@ Rules:
 ```
 credproxy/              HTTP proxy core — Provider/Store interfaces, Server, Route handler
   types.go              Provider, Request, Injection, Route, ServerConfig, Store interfaces
-  server.go             Server — TCP + Unix socket listeners, lifecycle (effectful shell)
+  server.go             Server — TCP + Unix socket listeners, periodic job scheduler, lifecycle (effectful shell)
   auth.go               authMiddleware + pure extractBearer / matchToken
   inject.go             decideAction / planRequest / needsRefresh (pure core)
   route.go              routeHandler — ModifyResponse/ErrorHandler-based refresh retry
   store/file.go         FileStore — atomic file-backed Store implementation
 container/              Container-injection abstraction
   spec.go               Spec{Env, Mounts, BridgeSpecs} — per-launch contribution
-  provider.go           Provider interface (Name/Init/Routes/ContainerSpec)
+  provider.go           Provider interface (Name/Init/Routes/ContainerSpec); optional PeriodicRegistrar
   runhash.go            ProjectRunHash — stable per-project run-dir name
 bridge/                 Generic TCP↔unix socket forwarder (provider-agnostic)
   bridge.go             Run(ctx, listenAddr, socketPath) — forwards TCP connections to a unix socket
@@ -149,7 +149,7 @@ cmd/sockbridge/         TCP↔unix bridge binary — used by providers that need
   main.go               -listen <addr> -socket <path>; wraps bridge.Run
 providers/              Pre-built container.Provider implementations — see each package README
   awssso/               AWS SSO via credential_process + HTTP route
-  gcloudcli/            GCE metadata server emulator + synthetic CLOUDSDK_CONFIG; on-demand token fetch
+  gcloudcli/            GCE metadata server emulator + synthetic CLOUDSDK_CONFIG; periodic + on-demand token refresh
   sshagent/             Per-project ephemeral ssh-agent
 hooks/                  Reference hook scripts (bash + curl + jq + aws CLI)
 packaging/              systemd unit, launchd plist
