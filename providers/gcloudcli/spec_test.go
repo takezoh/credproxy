@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/takezoh/credproxy/container"
@@ -221,11 +222,66 @@ func TestSpecBuilder_metadataServerDeduplication(t *testing.T) {
 	}
 
 	b.mu.Lock()
-	count := len(b.metaServers)
+	count := len(b.tokenTargets)
 	b.mu.Unlock()
 
 	if count != 1 {
 		t.Errorf("expected 1 metadata server for same project, got %d", count)
+	}
+}
+
+func TestSpecBuilder_refreshAllTokens_writesAllProjects(t *testing.T) {
+	cfg := newTestConfig(t)
+	var callCount atomic.Int32
+	b := NewSpecBuilder(context.Background(), cfg, func(string) GCPConfig {
+		return GCPConfig{Account: "user@example.com", Active: "proj-x"}
+	})
+	b.gcpToken = func(_ context.Context, _, _ string) (string, error) {
+		callCount.Add(1)
+		return "fresh-token", nil
+	}
+
+	for _, proj := range []string{"/proj-a", "/proj-b"} {
+		if _, err := b.ContainerSpec(context.Background(), proj); err != nil {
+			t.Fatalf("ContainerSpec(%s): %v", proj, err)
+		}
+	}
+	callCount.Store(0)
+
+	if err := b.refreshAllTokens(context.Background()); err != nil {
+		t.Fatalf("refreshAllTokens: %v", err)
+	}
+	if got := callCount.Load(); got != 2 {
+		t.Errorf("expected 2 token writes (one per project), got %d", got)
+	}
+}
+
+func TestSpecBuilder_refreshAllTokens_updatesFileContent(t *testing.T) {
+	cfg := newTestConfig(t)
+	b := NewSpecBuilder(context.Background(), cfg, func(string) GCPConfig {
+		return GCPConfig{Account: "user@example.com", Active: "proj-x"}
+	})
+	b.gcpToken = func(_ context.Context, _, _ string) (string, error) { return "stale-token", nil }
+
+	if _, err := b.ContainerSpec(context.Background(), "/proj"); err != nil {
+		t.Fatalf("ContainerSpec: %v", err)
+	}
+
+	b.gcpToken = func(_ context.Context, _, _ string) (string, error) { return "new-token", nil }
+	if err := b.refreshAllTokens(context.Background()); err != nil {
+		t.Fatalf("refreshAllTokens: %v", err)
+	}
+
+	b.mu.Lock()
+	target := b.tokenTargets["/proj"]
+	b.mu.Unlock()
+
+	data, err := os.ReadFile(target.tokenFilePath)
+	if err != nil {
+		t.Fatalf("read token file: %v", err)
+	}
+	if string(data) != "new-token" {
+		t.Errorf("token file = %q, want %q", string(data), "new-token")
 	}
 }
 
@@ -247,7 +303,7 @@ func TestSpecBuilder_metadataServerIsolationByProject(t *testing.T) {
 	}
 
 	b.mu.Lock()
-	count := len(b.metaServers)
+	count := len(b.tokenTargets)
 	b.mu.Unlock()
 
 	if count != 2 {

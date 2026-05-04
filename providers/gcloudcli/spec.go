@@ -34,14 +34,22 @@ type Config struct {
 	ContainerRunDir string
 }
 
+// tokenTarget holds the credentials and file path needed to refresh a project's token file.
+type tokenTarget struct {
+	account       string
+	sa            string
+	tokenFilePath string
+}
+
 // SpecBuilder implements container.Provider for the gcloud CLI.
 type SpecBuilder struct {
-	rootCtx context.Context
-	cfg     Config
-	gcpFor  func(projectPath string) GCPConfig
+	rootCtx  context.Context
+	cfg      Config
+	gcpFor   func(projectPath string) GCPConfig
+	gcpToken func(ctx context.Context, account, sa string) (string, error)
 
-	mu          sync.Mutex
-	metaServers map[string]struct{} // keyed by projectPath; guards duplicate starts
+	mu           sync.Mutex
+	tokenTargets map[string]tokenTarget // keyed by projectPath
 }
 
 // NewSpecBuilder creates a SpecBuilder.
@@ -49,10 +57,11 @@ type SpecBuilder struct {
 // rootCtx controls the lifetime of per-project metadata server goroutines.
 func NewSpecBuilder(rootCtx context.Context, cfg Config, gcpFor func(string) GCPConfig) *SpecBuilder {
 	return &SpecBuilder{
-		rootCtx:    rootCtx,
-		cfg:        cfg,
-		gcpFor:     gcpFor,
-		metaServers: make(map[string]struct{}),
+		rootCtx:      rootCtx,
+		cfg:          cfg,
+		gcpFor:       gcpFor,
+		gcpToken:     gcpPrintAccessToken,
+		tokenTargets: make(map[string]tokenTarget),
 	}
 }
 
@@ -64,6 +73,40 @@ func (b *SpecBuilder) Init() error {
 		return fmt.Errorf("gcloudcli: mkdir runBase: %w", err)
 	}
 	return nil
+}
+
+// RegisterPeriodic implements container.PeriodicRegistrar.
+// It registers a job that refreshes all known token files every 25 minutes.
+func (b *SpecBuilder) RegisterPeriodic(srv *credproxylib.Server) {
+	srv.RegisterPeriodic(credproxylib.PeriodicJob{
+		Name:  "gcloudcli/token-refresh",
+		Every: 25 * time.Minute,
+		Run:   b.refreshAllTokens,
+	})
+}
+
+func (b *SpecBuilder) refreshAllTokens(ctx context.Context) error {
+	b.mu.Lock()
+	targets := make([]tokenTarget, 0, len(b.tokenTargets))
+	for _, t := range b.tokenTargets {
+		targets = append(targets, t)
+	}
+	b.mu.Unlock()
+
+	for _, t := range targets {
+		if err := b.writeTokenFile(ctx, t); err != nil {
+			slog.Warn("gcloudcli: token refresh failed", "path", t.tokenFilePath, "err", err)
+		}
+	}
+	return nil
+}
+
+func (b *SpecBuilder) writeTokenFile(ctx context.Context, t tokenTarget) error {
+	token, err := b.gcpToken(ctx, t.account, t.sa)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(t.tokenFilePath, []byte(token), 0o600)
 }
 
 // Routes returns nil; gcloudcli uses a per-project unix socket, not a credproxy route.
@@ -136,7 +179,7 @@ func (b *SpecBuilder) ContainerSpec(_ context.Context, projectPath string) (cont
 
 func (b *SpecBuilder) ensureMetadataServer(projectPath, account, sa, project, sockPath, tokenFilePath string) error {
 	b.mu.Lock()
-	if _, running := b.metaServers[projectPath]; running {
+	if _, running := b.tokenTargets[projectPath]; running {
 		b.mu.Unlock()
 		return nil
 	}
@@ -149,7 +192,7 @@ func (b *SpecBuilder) ensureMetadataServer(projectPath, account, sa, project, so
 		b.mu.Unlock()
 		return fmt.Errorf("gcloudcli: listen metadata sock: %w", err)
 	}
-	b.metaServers[projectPath] = struct{}{}
+	b.tokenTargets[projectPath] = tokenTarget{account: account, sa: sa, tokenFilePath: tokenFilePath}
 	srv := &http.Server{
 		Handler:      metadataHandler(account, sa, project, tokenFilePath),
 		ReadTimeout:  10 * time.Second,
@@ -168,10 +211,9 @@ func (b *SpecBuilder) ensureMetadataServer(projectPath, account, sa, project, so
 	b.mu.Unlock()
 
 	// Pre-populate token file outside the lock; gcloud exec may take hundreds of ms.
-	if tokenFilePath != "" {
-		if token, err := gcpPrintAccessToken(b.rootCtx, account, sa); err == nil {
-			_ = os.WriteFile(tokenFilePath, []byte(token), 0o600)
-		}
+	target := tokenTarget{account: account, sa: sa, tokenFilePath: tokenFilePath}
+	if err := b.writeTokenFile(b.rootCtx, target); err != nil {
+		slog.Warn("gcloudcli: initial token write failed", "err", err)
 	}
 	return nil
 }

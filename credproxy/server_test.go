@@ -9,7 +9,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/takezoh/credproxy/credproxy"
 )
@@ -289,6 +291,43 @@ func TestServer_AddAuthToken_dynamic(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+// TestServer_RegisterPeriodic verifies that a periodic job fires repeatedly and serially.
+func TestServer_RegisterPeriodic(t *testing.T) {
+	srv, err := credproxy.New(credproxy.ServerConfig{
+		ListenTCP:            "127.0.0.1:0",
+		AllowUnauthenticated: true,
+		Routes:               nil,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var calls atomic.Int32
+	srv.RegisterPeriodic(credproxy.PeriodicJob{
+		Name:  "test-job",
+		Every: 20 * time.Millisecond,
+		Run: func(ctx context.Context) error {
+			calls.Add(1)
+			return nil
+		},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go func() { _ = srv.Run(ctx) }()
+
+	deadline := time.Now().Add(300 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if calls.Load() >= 3 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := calls.Load(); got < 3 {
+		t.Errorf("expected ≥3 job invocations, got %d", got)
 	}
 }
 

@@ -21,15 +21,24 @@ type tokenEntry struct {
 	id    string
 }
 
+// PeriodicJob is a background task that runs on a fixed interval while the server is running.
+// RegisterPeriodic must be called before Run; jobs start when Run is called.
+type PeriodicJob struct {
+	Name  string
+	Every time.Duration
+	Run   func(ctx context.Context) error
+}
+
 // Server is the credential proxy HTTP server.
 type Server struct {
-	cfg       ServerConfig
-	log       *slog.Logger
-	tokensMu  sync.RWMutex
-	tokens    []tokenEntry
-	mux       *http.ServeMux
-	listeners []net.Listener
-	tcpAddr   string
+	cfg          ServerConfig
+	log          *slog.Logger
+	tokensMu     sync.RWMutex
+	tokens       []tokenEntry
+	mux          *http.ServeMux
+	listeners    []net.Listener
+	tcpAddr      string
+	periodicJobs []PeriodicJob
 }
 
 // New creates and binds a Server. Listeners are opened immediately so that
@@ -95,9 +104,16 @@ func (s *Server) tokenCount() int {
 // Handler returns the underlying http.Handler (useful for testing without listeners).
 func (s *Server) Handler() http.Handler { return s.mux }
 
+// RegisterPeriodic adds a job to be run on a fixed interval. Must be called before Run.
+func (s *Server) RegisterPeriodic(j PeriodicJob) {
+	s.periodicJobs = append(s.periodicJobs, j)
+}
+
 // Run starts serving on the already-opened listeners and blocks until ctx is cancelled.
 func (s *Server) Run(ctx context.Context) error {
 	srv := &http.Server{Handler: s.mux}
+
+	go s.runScheduler(ctx)
 
 	errCh := make(chan error, len(s.listeners))
 	for _, ln := range s.listeners {
@@ -119,6 +135,49 @@ func (s *Server) Run(ctx context.Context) error {
 		return srv.Shutdown(shutCtx)
 	case err := <-errCh:
 		return err
+	}
+}
+
+func (s *Server) runScheduler(ctx context.Context) {
+	if len(s.periodicJobs) == 0 {
+		return
+	}
+	type entry struct {
+		job      PeriodicJob
+		nextFire time.Time
+	}
+	entries := make([]entry, len(s.periodicJobs))
+	now := time.Now()
+	for i, j := range s.periodicJobs {
+		entries[i] = entry{j, now.Add(j.Every)}
+	}
+	for {
+		next := entries[0].nextFire
+		for _, e := range entries[1:] {
+			if e.nextFire.Before(next) {
+				next = e.nextFire
+			}
+		}
+		delay := time.Until(next)
+		if delay < 0 {
+			delay = 0
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		now = time.Now()
+		for i := range entries {
+			if !entries[i].nextFire.After(now) {
+				if err := entries[i].job.Run(ctx); err != nil && ctx.Err() == nil {
+					s.log.Warn("credproxy: periodic job failed", "job", entries[i].job.Name, "err", err)
+				}
+				entries[i].nextFire = time.Now().Add(entries[i].job.Every)
+			}
+		}
 	}
 }
 
