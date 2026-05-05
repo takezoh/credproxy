@@ -9,7 +9,7 @@ gcloud CLI credential isolation for containers. `~/.config/gcloud` (including th
 | Field | Required | Description |
 |-------|----------|-------------|
 | `Account` | yes | host gcloud principal whose credentials are used |
-| `Active` | yes | project name written to `active_config` (the container's default project) |
+| `Active` | yes | GCP project ID written to `active_config` (the container's default project) |
 | `ServiceAccount` | SA mode only | SA email to impersonate; presence selects SA mode |
 | `Projects` | SA mode only | project IDs for which config files are written |
 
@@ -52,7 +52,7 @@ Container env vars injected:
 |---|---|---|
 | `CLOUDSDK_CONFIG` | Container path to the synthetic config directory | gcloud CLI |
 | `GCE_METADATA_HOST` | `127.0.0.1:8181` | gcloud CLI, all Google SDKs |
-| `GCE_METADATA_IP` | `127.0.0.1` | Python google-auth library |
+| `GCE_METADATA_IP` | `127.0.0.1:8181` | Python google-auth (uses this var for GCE detection ping) |
 
 The container also receives a `BridgeSpec` that launches `sockbridge` during `postCreateCommand`:
 
@@ -80,12 +80,16 @@ Token source by mode:
 
 | Endpoint | Returns |
 |---|---|
+| `/` | `0.1/\ncomputeMetadata/\n` (GCE detection ping target) |
+| `/computeMetadata/` | `v1/\n` |
+| `/computeMetadata/v1/` | `instance/\nproject/\n` |
+| `/computeMetadata/v1/instance/service-accounts/default/` | JSON `{aliases, email, scopes}` (recursive info) |
 | `/computeMetadata/v1/instance/service-accounts/default/token` | JSON `{access_token, expires_in, token_type}` |
 | `/computeMetadata/v1/instance/service-accounts/default/email` | SA email (or account if no SA) |
 | `/computeMetadata/v1/instance/service-accounts/default/scopes` | `https://www.googleapis.com/auth/cloud-platform` |
 | `/computeMetadata/v1/project/project-id` | Active project ID |
 
-All endpoints require `Metadata-Flavor: Google` header (standard GCE metadata protocol).
+All endpoints require `Metadata-Flavor: Google` request header and return `Metadata-Flavor: Google` response header (standard GCE metadata protocol). Unregistered paths return 404.
 
 ## Security
 

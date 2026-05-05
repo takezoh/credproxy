@@ -83,7 +83,7 @@ func ContainerEnv(configContainerPath string) map[string]string {
 	return map[string]string{
 		ConfigDirEnv:    configContainerPath,
 		MetadataHostEnv: metadataListenAddr,
-		MetadataIPEnv:   "127.0.0.1",
+		MetadataIPEnv:   metadataListenAddr,
 	}
 }
 

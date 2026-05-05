@@ -10,12 +10,20 @@ import (
 )
 
 const (
-	metadataTokenPath   = "/computeMetadata/v1/instance/service-accounts/default/token"
-	metadataEmailPath   = "/computeMetadata/v1/instance/service-accounts/default/email"
-	metadataScopesPath  = "/computeMetadata/v1/instance/service-accounts/default/scopes"
-	metadataProjectPath = "/computeMetadata/v1/project/project-id"
-	metadataFlavor      = "Google"
+	metadataTokenPath      = "/computeMetadata/v1/instance/service-accounts/default/token"
+	metadataEmailPath      = "/computeMetadata/v1/instance/service-accounts/default/email"
+	metadataScopesPath     = "/computeMetadata/v1/instance/service-accounts/default/scopes"
+	metadataProjectPath    = "/computeMetadata/v1/project/project-id"
+	metadataServiceAccPath = "/computeMetadata/v1/instance/service-accounts/default/"
+	metadataFlavor         = "Google"
+	metadataCloudPlatform  = "https://www.googleapis.com/auth/cloud-platform"
 )
+
+type serviceAccountInfo struct {
+	Aliases []string `json:"aliases"`
+	Email   string   `json:"email"`
+	Scopes  []string `json:"scopes"`
+}
 
 type tokenResponse struct {
 	AccessToken string `json:"access_token"`
@@ -28,6 +36,24 @@ type tokenResponse struct {
 // so that gcloud CLI's auth/access_token_file stays current.
 func metadataHandler(account, serviceAccount, project, tokenFilePath string) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/", serveMetadataDir("/", "0.1/\ncomputeMetadata/\n"))
+	mux.HandleFunc("/computeMetadata/", serveMetadataDir("/computeMetadata/", "v1/\n"))
+	mux.HandleFunc("/computeMetadata/v1/", serveMetadataDir("/computeMetadata/v1/", "instance/\nproject/\n"))
+	mux.HandleFunc(metadataServiceAccPath, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != metadataServiceAccPath {
+			http.NotFound(w, r)
+			return
+		}
+		if !checkFlavor(w, r) {
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(serviceAccountInfo{ //nolint:errcheck
+			Aliases: []string{"default"},
+			Email:   resolveEmail(serviceAccount, account),
+			Scopes:  []string{metadataCloudPlatform},
+		})
+	})
 	mux.HandleFunc(metadataTokenPath, func(w http.ResponseWriter, r *http.Request) {
 		if !checkFlavor(w, r) {
 			return
@@ -51,19 +77,15 @@ func metadataHandler(account, serviceAccount, project, tokenFilePath string) htt
 		if !checkFlavor(w, r) {
 			return
 		}
-		email := serviceAccount
-		if email == "" {
-			email = account
-		}
 		w.Header().Set("Content-Type", "text/plain")
-		w.Write([]byte(email)) //nolint:errcheck
+		w.Write([]byte(resolveEmail(serviceAccount, account))) //nolint:errcheck
 	})
 	mux.HandleFunc(metadataScopesPath, func(w http.ResponseWriter, r *http.Request) {
 		if !checkFlavor(w, r) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain")
-		w.Write([]byte("https://www.googleapis.com/auth/cloud-platform")) //nolint:errcheck
+		w.Write([]byte(metadataCloudPlatform)) //nolint:errcheck
 	})
 	mux.HandleFunc(metadataProjectPath, func(w http.ResponseWriter, r *http.Request) {
 		if !checkFlavor(w, r) {
@@ -75,11 +97,33 @@ func metadataHandler(account, serviceAccount, project, tokenFilePath string) htt
 	return mux
 }
 
+func serveMetadataDir(path, body string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != path {
+			http.NotFound(w, r)
+			return
+		}
+		if !checkFlavor(w, r) {
+			return
+		}
+		w.Header().Set("Content-Type", "application/text")
+		w.Write([]byte(body)) //nolint:errcheck
+	}
+}
+
+func resolveEmail(serviceAccount, account string) string {
+	if serviceAccount != "" {
+		return serviceAccount
+	}
+	return account
+}
+
 func checkFlavor(w http.ResponseWriter, r *http.Request) bool {
 	if r.Header.Get("Metadata-Flavor") != metadataFlavor {
 		http.Error(w, "Missing or invalid Metadata-Flavor header", http.StatusForbidden)
 		return false
 	}
+	w.Header().Set("Metadata-Flavor", metadataFlavor)
 	return true
 }
 

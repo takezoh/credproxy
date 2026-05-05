@@ -83,7 +83,7 @@ func TestContainerEnv_containsCloudsdkConfig(t *testing.T) {
 	if env[MetadataHostEnv] != metadataListenAddr {
 		t.Errorf("ContainerEnv()[%q] = %q, want %q", MetadataHostEnv, env[MetadataHostEnv], metadataListenAddr)
 	}
-	if env[MetadataIPEnv] != "127.0.0.1" {
-		t.Errorf("ContainerEnv()[%q] = %q, want %q", MetadataIPEnv, env[MetadataIPEnv], "127.0.0.1")
+	if env[MetadataIPEnv] != metadataListenAddr {
+		t.Errorf("ContainerEnv()[%q] = %q, want %q", MetadataIPEnv, env[MetadataIPEnv], metadataListenAddr)
 	}
 }

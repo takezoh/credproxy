@@ -20,6 +20,66 @@ func stubGcloudForMetadata(t *testing.T, token string) {
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
 }
 
+func TestMetadataHandler_rootPing_missingFlavor(t *testing.T) {
+	h := metadataHandler("user@example.com", "", "proj-x", "")
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusForbidden)
+	}
+}
+
+func TestMetadataHandler_rootPing_returnsFlavorHeader(t *testing.T) {
+	h := metadataHandler("user@example.com", "", "proj-x", "")
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("Metadata-Flavor", "Google")
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if got := w.Header().Get("Metadata-Flavor"); got != "Google" {
+		t.Errorf("Metadata-Flavor response header = %q, want %q", got, "Google")
+	}
+}
+
+func TestMetadataHandler_unknownPath_notFound(t *testing.T) {
+	h := metadataHandler("user@example.com", "", "proj-x", "")
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/unknown/path", nil)
+	r.Header.Set("Metadata-Flavor", "Google")
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+func TestMetadataHandler_serviceAccountInfo_returnsEmailAndScopes(t *testing.T) {
+	h := metadataHandler("user@example.com", "sa@proj.iam.gserviceaccount.com", "proj-x", "")
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/computeMetadata/v1/instance/service-accounts/default/?recursive=true", nil)
+	r.Header.Set("Metadata-Flavor", "Google")
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+	var info serviceAccountInfo
+	if err := json.NewDecoder(w.Body).Decode(&info); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if info.Email != "sa@proj.iam.gserviceaccount.com" {
+		t.Errorf("email = %q, want SA email", info.Email)
+	}
+	if len(info.Scopes) == 0 {
+		t.Error("scopes empty")
+	}
+	if got := w.Header().Get("Metadata-Flavor"); got != "Google" {
+		t.Errorf("Metadata-Flavor response header = %q, want %q", got, "Google")
+	}
+}
+
 func TestMetadataHandler_tokenEndpoint_missingFlavor(t *testing.T) {
 	h := metadataHandler("user@example.com", "", "proj-x", "")
 	w := httptest.NewRecorder()
@@ -53,6 +113,9 @@ func TestMetadataHandler_tokenEndpoint_returnsToken(t *testing.T) {
 	}
 	if resp.ExpiresIn <= 0 {
 		t.Errorf("expires_in = %d, want > 0", resp.ExpiresIn)
+	}
+	if got := w.Header().Get("Metadata-Flavor"); got != "Google" {
+		t.Errorf("Metadata-Flavor response header = %q, want %q", got, "Google")
 	}
 }
 
