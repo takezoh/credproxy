@@ -83,13 +83,15 @@ Token source by mode:
 | `/` | `0.1/\ncomputeMetadata/\n` (GCE detection ping target) |
 | `/computeMetadata/` | `v1/\n` |
 | `/computeMetadata/v1/` | `instance/\nproject/\n` |
-| `/computeMetadata/v1/instance/service-accounts/default/` | JSON `{aliases, email, scopes}` (recursive info) |
-| `/computeMetadata/v1/instance/service-accounts/default/token` | JSON `{access_token, expires_in, token_type}` |
-| `/computeMetadata/v1/instance/service-accounts/default/email` | SA email (or account if no SA) |
-| `/computeMetadata/v1/instance/service-accounts/default/scopes` | `https://www.googleapis.com/auth/cloud-platform` |
+| `/computeMetadata/v1/instance/service-accounts/<seg>/` | JSON `{aliases, email, scopes}` (recursive info) |
+| `/computeMetadata/v1/instance/service-accounts/<seg>/token` | JSON `{access_token, expires_in, token_type}` |
+| `/computeMetadata/v1/instance/service-accounts/<seg>/email` | SA email (or account if no SA) |
+| `/computeMetadata/v1/instance/service-accounts/<seg>/scopes` | `https://www.googleapis.com/auth/cloud-platform` |
 | `/computeMetadata/v1/project/project-id` | Active project ID |
 
-All endpoints require `Metadata-Flavor: Google` request header and return `Metadata-Flavor: Google` response header (standard GCE metadata protocol). Unregistered paths return 404.
+`<seg>` accepts `default` or the active principal email (SA email in SA mode; account email in user-account mode). Any other segment returns 404.
+
+All endpoints require `Metadata-Flavor: Google` request header and return `Metadata-Flavor: Google` response header (standard GCE metadata protocol).
 
 ## Security
 

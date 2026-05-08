@@ -1,6 +1,7 @@
 package gcloudcli
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -10,13 +11,18 @@ import (
 )
 
 const (
-	metadataTokenPath      = "/computeMetadata/v1/instance/service-accounts/default/token"
-	metadataEmailPath      = "/computeMetadata/v1/instance/service-accounts/default/email"
-	metadataScopesPath     = "/computeMetadata/v1/instance/service-accounts/default/scopes"
-	metadataProjectPath    = "/computeMetadata/v1/project/project-id"
-	metadataServiceAccPath = "/computeMetadata/v1/instance/service-accounts/default/"
-	metadataFlavor         = "Google"
-	metadataCloudPlatform  = "https://www.googleapis.com/auth/cloud-platform"
+	metadataTokenPath   = "/computeMetadata/v1/instance/service-accounts/default/token"
+	metadataEmailPath   = "/computeMetadata/v1/instance/service-accounts/default/email"
+	metadataScopesPath  = "/computeMetadata/v1/instance/service-accounts/default/scopes"
+	metadataProjectPath = "/computeMetadata/v1/project/project-id"
+
+	metadataSABase      = "/computeMetadata/v1/instance/service-accounts/"
+	metadataSADefault   = "default"
+	metadataTokenSuffix = "/token"
+	metadataEmailSuffix = "/email"
+	metadataScopesSuffix = "/scopes"
+	metadataFlavor      = "Google"
+	metadataCloudPlatform = "https://www.googleapis.com/auth/cloud-platform"
 )
 
 type serviceAccountInfo struct {
@@ -36,57 +42,64 @@ type tokenResponse struct {
 // so that gcloud CLI's auth/access_token_file stays current.
 func metadataHandler(account, serviceAccount, project, tokenFilePath string) http.Handler {
 	mux := http.NewServeMux()
+	principal := cmp.Or(serviceAccount, account)
+
 	mux.HandleFunc("/", serveMetadataDir("/", "0.1/\ncomputeMetadata/\n"))
 	mux.HandleFunc("/computeMetadata/", serveMetadataDir("/computeMetadata/", "v1/\n"))
 	mux.HandleFunc("/computeMetadata/v1/", serveMetadataDir("/computeMetadata/v1/", "instance/\nproject/\n"))
-	mux.HandleFunc(metadataServiceAccPath, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != metadataServiceAccPath {
-			http.NotFound(w, r)
-			return
-		}
-		if !checkFlavor(w, r) {
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(serviceAccountInfo{ //nolint:errcheck
-			Aliases: []string{"default"},
-			Email:   resolveEmail(serviceAccount, account),
-			Scopes:  []string{metadataCloudPlatform},
+
+	for _, seg := range saSegments(principal) {
+		infoPath := metadataSABase + seg + "/"
+		mux.HandleFunc(infoPath, func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != infoPath {
+				http.NotFound(w, r)
+				return
+			}
+			if !checkFlavor(w, r) {
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(serviceAccountInfo{ //nolint:errcheck
+				Aliases: []string{metadataSADefault},
+				Email:   principal,
+				Scopes:  []string{metadataCloudPlatform},
+			})
 		})
-	})
-	mux.HandleFunc(metadataTokenPath, func(w http.ResponseWriter, r *http.Request) {
-		if !checkFlavor(w, r) {
-			return
-		}
-		token, err := gcpPrintAccessToken(r.Context(), account, serviceAccount)
-		if err != nil {
-			http.Error(w, "token fetch failed", http.StatusInternalServerError)
-			return
-		}
-		if tokenFilePath != "" {
-			_ = os.WriteFile(tokenFilePath, []byte(token), 0o600)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(tokenResponse{ //nolint:errcheck
-			AccessToken: token,
-			ExpiresIn:   1800,
-			TokenType:   "Bearer",
+		mux.HandleFunc(metadataSABase+seg+metadataTokenSuffix, func(w http.ResponseWriter, r *http.Request) {
+			if !checkFlavor(w, r) {
+				return
+			}
+			token, err := gcpPrintAccessToken(r.Context(), account, serviceAccount)
+			if err != nil {
+				http.Error(w, "token fetch failed", http.StatusInternalServerError)
+				return
+			}
+			if tokenFilePath != "" {
+				_ = os.WriteFile(tokenFilePath, []byte(token), 0o600)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(tokenResponse{ //nolint:errcheck
+				AccessToken: token,
+				ExpiresIn:   1800,
+				TokenType:   "Bearer",
+			})
 		})
-	})
-	mux.HandleFunc(metadataEmailPath, func(w http.ResponseWriter, r *http.Request) {
-		if !checkFlavor(w, r) {
-			return
-		}
-		w.Header().Set("Content-Type", "text/plain")
-		w.Write([]byte(resolveEmail(serviceAccount, account))) //nolint:errcheck
-	})
-	mux.HandleFunc(metadataScopesPath, func(w http.ResponseWriter, r *http.Request) {
-		if !checkFlavor(w, r) {
-			return
-		}
-		w.Header().Set("Content-Type", "text/plain")
-		w.Write([]byte(metadataCloudPlatform)) //nolint:errcheck
-	})
+		mux.HandleFunc(metadataSABase+seg+metadataEmailSuffix, func(w http.ResponseWriter, r *http.Request) {
+			if !checkFlavor(w, r) {
+				return
+			}
+			w.Header().Set("Content-Type", "text/plain")
+			w.Write([]byte(principal)) //nolint:errcheck
+		})
+		mux.HandleFunc(metadataSABase+seg+metadataScopesSuffix, func(w http.ResponseWriter, r *http.Request) {
+			if !checkFlavor(w, r) {
+				return
+			}
+			w.Header().Set("Content-Type", "text/plain")
+			w.Write([]byte(metadataCloudPlatform)) //nolint:errcheck
+		})
+	}
+
 	mux.HandleFunc(metadataProjectPath, func(w http.ResponseWriter, r *http.Request) {
 		if !checkFlavor(w, r) {
 			return
@@ -95,6 +108,13 @@ func metadataHandler(account, serviceAccount, project, tokenFilePath string) htt
 		w.Write([]byte(project)) //nolint:errcheck
 	})
 	return mux
+}
+
+func saSegments(principal string) []string {
+	if principal == metadataSADefault || principal == "" {
+		return []string{metadataSADefault}
+	}
+	return []string{metadataSADefault, principal}
 }
 
 func serveMetadataDir(path, body string) http.HandlerFunc {
@@ -109,13 +129,6 @@ func serveMetadataDir(path, body string) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/text")
 		w.Write([]byte(body)) //nolint:errcheck
 	}
-}
-
-func resolveEmail(serviceAccount, account string) string {
-	if serviceAccount != "" {
-		return serviceAccount
-	}
-	return account
 }
 
 func checkFlavor(w http.ResponseWriter, r *http.Request) bool {
