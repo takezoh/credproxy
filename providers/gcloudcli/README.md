@@ -31,7 +31,7 @@ gcloud auth application-default login
 [container gcloud / Google SDK]
     │ HTTP to 127.0.0.1:8181  (GCE_METADATA_HOST)
     ↓
-[sockbridge — in-container TCP↔unix forwarder]
+[TCP↔unix forwarder — in-container, launched via postCreateCommand]
     │ unix socket (bind-mounted from host run dir)
     ↓
 [host: per-project GCE metadata server emulator (unix socket listener)]
@@ -54,13 +54,13 @@ Container env vars injected:
 | `GCE_METADATA_HOST` | `127.0.0.1:8181` | gcloud CLI, all Google SDKs |
 | `GCE_METADATA_IP` | `127.0.0.1:8181` | Python google-auth (uses this var for GCE detection ping) |
 
-The container also receives a `BridgeSpec` that launches `sockbridge` during `postCreateCommand`:
+The container also receives a `BridgeSpec` that the host runner translates into a `postCreateCommand` which starts a TCP↔unix forwarder:
 
 ```sh
-sockbridge -listen 127.0.0.1:8181 -socket /opt/roost/run/gcp-metadata.sock &
+roost-bridge sockbridge -listen 127.0.0.1:8181 -socket /opt/roost/run/gcp-metadata.sock &
 ```
 
-`sockbridge` is a provider-agnostic TCP↔unix forwarder built from `credproxy/bridge/` and installed alongside the roost binary.
+The forwarder is the `sockbridge` subcommand of `roost-bridge`, the utility binary installed alongside the roost daemon.
 
 ## Token refresh
 
