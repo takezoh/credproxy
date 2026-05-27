@@ -1,4 +1,5 @@
 BINARY := credproxyd
+RUNNER := credproxy
 SOCKBRIDGE := sockbridge
 BIN_DIR := /usr/local/bin
 
@@ -6,6 +7,7 @@ BIN_DIR := /usr/local/bin
 
 build:
 	go build -o $(BINARY) ./cmd/credproxyd
+	go build -o $(RUNNER) ./cmd/credproxy
 	go build -o $(SOCKBRIDGE) ./cmd/sockbridge
 
 test:
@@ -22,4 +24,4 @@ install: build
 	@echo "Installed $(BIN_DIR)/$(BINARY)"
 
 clean:
-	rm -f $(BINARY) $(SOCKBRIDGE)
+	rm -f $(BINARY) $(RUNNER) $(SOCKBRIDGE)

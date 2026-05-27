@@ -139,6 +139,13 @@ container/              Container-injection abstraction
   spec.go               Spec{Env, Mounts, BridgeSpecs} and BridgeSpec{ListenAddr, ContainerSocketPath}
   provider.go           Provider interface (Name/Init/Routes/ContainerSpec); optional PeriodicRegistrar
   runhash.go            ProjectRunHash — stable per-project run-dir name
+secretenv/              Secret env-file resolver library (roost-agnostic)
+  envfile.go            ParseFile — NAME=ref line parser (first '=' splits, skips comments/blanks)
+  resolver.go           Resolver — reads env-file, resolves each ref via Hook, all-or-nothing
+  scripthook.go         ScriptHook — subprocess hook (stdin/stdout JSON), TTL cache, singleflight
+cmd/credproxy/          CLI binary for ad-hoc secret injection (bare-host users)
+  main.go               "credproxy run --env-file X -- cmd" — resolves env-file locally, syscall.Exec
+  config.go             Load ~/.config/credproxy/config.toml; hook command required
 cmd/credproxyd/         Shared daemon binary (hook script users)
   main.go               flag parse, signal handling, credproxy.New + Run
   config/               Load / expand (pure) / validate (pure)

@@ -185,6 +185,54 @@ Hooks receive a JSON object on stdin and must write a JSON object to stdout:
 | `hooks/anthropic-refresh.sh` | Anthropic OAuth refresh | `curl`, `jq` |
 | `hooks/aws-sso-get.sh` | AWS SSO temporary credentials | `aws` CLI, `jq` |
 
+---
+
+## credproxy run — ad-hoc secret injection
+
+`credproxy run` resolves opaque references in an env-file and injects the real values into a **single subprocess** environment. Follows the `op run --env-file` model.
+
+```sh
+credproxy run --env-file .secrets.env -- terraform apply
+```
+
+The env-file uses `NAME=ref` format. Lines with comments (`#`) or without `=` are skipped. Lines where the value looks like a reference are resolved; all others pass through as-is.
+
+```ini
+TF_VAR_db_password=op://infra/db/password
+TF_VAR_api_key=op://infra/api/key
+PLAIN_VALUE=literal            # passed through unchanged (literal, not a ref)
+```
+
+Configure hook in `~/.config/credproxy/config.toml`:
+
+```toml
+hook = ["op", "run", "--no-masking", "--", "sh", "-c", "echo {\"value\":\"$OP_SESSION\"}"]
+# or a wrapper script:
+hook = ["/usr/local/bin/resolve-secret"]
+hook_timeout_sec = 15   # default: 10
+```
+
+The hook receives one reference per call: `stdin: {"ref":"<ref>"}` → `stdout: {"value":"<secret>","expires_in_sec":N}`.
+
+Resolved values are injected into the subprocess environment. If resolution fails for any entry, the command is not executed and an error is returned. The subprocess runs via `syscall.Exec` — it replaces the credproxy process entirely, so signals are received directly.
+
+**Note:** `credproxy run` is for bare-host use only (no gate). When running inside a roost devcontainer, the `credproxy` binary on PATH is the roost-provided shim, which routes through the host-side broker that enforces an env-file path allowlist.
+
+## secretenv — resolver library
+
+`secretenv/` is a roost-agnostic library for env-file parsing and secret resolution. It is used both by `cmd/credproxy` (bare-host) and by the roost `platform/secretenv` broker (container-side).
+
+```go
+import "github.com/takezoh/credproxy/secretenv"
+
+hook := secretenv.NewScriptHook([]string{"/usr/local/bin/resolve"}, 10*time.Second)
+resolver := secretenv.NewResolver(hook)
+env, err := resolver.ResolveFile(ctx, ".secrets.env")
+// env: map[string]string{"SECRET": "actual-value", ...}
+```
+
+`ScriptHook` caches resolved values per-ref using the TTL from `expires_in_sec` minus a 30-second safety margin. Concurrent `Resolve` calls for the same ref are deduplicated via singleflight.
+
 ## Architecture
 
 See [ARCHITECTURE.md](ARCHITECTURE.md).
