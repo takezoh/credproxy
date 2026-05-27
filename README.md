@@ -195,28 +195,38 @@ Hooks receive a JSON object on stdin and must write a JSON object to stdout:
 credproxy run --env-file .secrets.env -- terraform apply
 ```
 
-The env-file uses `NAME=ref` format. Lines with comments (`#`) or without `=` are skipped. Lines where the value looks like a reference are resolved; all others pass through as-is.
+The env-file uses `NAME=ref` format. Lines with comments (`#`) or without `=` are skipped.
 
 ```ini
 TF_VAR_db_password=op://infra/db/password
 TF_VAR_api_key=op://infra/api/key
-PLAIN_VALUE=literal            # passed through unchanged (literal, not a ref)
 ```
 
 Configure hook in `~/.config/credproxy/config.toml`:
 
 ```toml
-hook = ["op", "run", "--no-masking", "--", "sh", "-c", "echo {\"value\":\"$OP_SESSION\"}"]
-# or a wrapper script:
 hook = ["/usr/local/bin/resolve-secret"]
 hook_timeout_sec = 15   # default: 10
 ```
 
 The hook receives one reference per call: `stdin: {"ref":"<ref>"}` → `stdout: {"value":"<secret>","expires_in_sec":N}`.
 
-Resolved values are injected into the subprocess environment. If resolution fails for any entry, the command is not executed and an error is returned. The subprocess runs via `syscall.Exec` — it replaces the credproxy process entirely, so signals are received directly.
+Resolved values are injected into the subprocess environment only. If resolution fails for any entry, the command is not executed. The subprocess runs via `syscall.Exec` — it replaces the credproxy process entirely, so signals are received directly.
 
 **Note:** `credproxy run` is for bare-host use only (no gate). When running inside a roost devcontainer, the `credproxy` binary on PATH is the roost-provided shim, which routes through the host-side broker that enforces an env-file path allowlist.
+
+## credproxy resolve — resolve env-file refs and print JSON env
+
+`credproxy resolve` resolves the same env-file format as `run` but prints the result as JSON instead of executing a command. Useful for scripts that need the resolved values as structured data.
+
+```sh
+credproxy resolve --env-file .secrets.env
+# stdout: {"env":{"TF_VAR_db_password":"actual-value","TF_VAR_api_key":"key-value"}}
+```
+
+Uses the same `~/.config/credproxy/config.toml` hook configuration as `run`.
+
+**Security:** `resolve` outputs only the entries declared in the env-file. Host environment variables are never included in the output — only the resolved secret values cross the process boundary to the caller. This is the interface used by the roost container broker to resolve secrets on behalf of container-side processes.
 
 ## secretenv — resolver library
 
