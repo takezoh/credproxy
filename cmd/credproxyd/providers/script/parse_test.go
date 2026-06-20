@@ -26,6 +26,20 @@ func TestParseHookResponse_headers(t *testing.T) {
 	}
 }
 
+func TestParseHookResponse_appendHeaders(t *testing.T) {
+	stdout := []byte(`{"headers":{"Authorization":"Bearer tok"},"append_headers":{"anthropic-beta":"oauth-2025-04-20"},"expires_in_sec":3600}`)
+	inj, _, err := parseHookResponse(stdout, testNow, testSafety)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if inj.Headers["Authorization"] != "Bearer tok" {
+		t.Errorf("Authorization = %q", inj.Headers["Authorization"])
+	}
+	if inj.AppendHeaders["anthropic-beta"] != "oauth-2025-04-20" {
+		t.Errorf("AppendHeaders = %v", inj.AppendHeaders)
+	}
+}
+
 func TestParseHookResponse_bodyReplace_valid(t *testing.T) {
 	stdout := []byte(`{"body_replace":{"AccessKeyId":"AK"}}`)
 	inj, _, err := parseHookResponse(stdout, testNow, testSafety)

@@ -31,8 +31,14 @@ type Request struct {
 
 // Injection describes what the proxy should inject before forwarding.
 type Injection struct {
-	// Headers are merged into the upstream request.
+	// Headers are set on the upstream request, replacing any existing value.
 	Headers map[string]string
+	// AppendHeaders are merged into existing comma-separated header values
+	// (e.g. "anthropic-beta") rather than replacing them. Tokens already
+	// present in the inbound header are not duplicated. Use this when the
+	// client already sends meaningful values for the same header and the
+	// injected value must be added alongside them.
+	AppendHeaders map[string]string
 	// Query params are merged into the upstream URL.
 	Query map[string]string
 	// BodyReplace, when non-nil, is returned directly to the client without upstream forwarding.

@@ -43,7 +43,13 @@ if (( expires_at > 0 )); then
     expires_in_sec=$(( (expires_at - now_ms) / 1000 ))
 fi
 
+# The OAuth (subscription) access token requires the oauth beta flag on every
+# request. It is added via append_headers so the client's own anthropic-beta
+# values (e.g. fine-grained tool streaming, 1M context) are preserved, not
+# overwritten.
 jq -n \
     --arg token "${access_token}" \
     --argjson exp "${expires_in_sec}" \
-    '{"headers":{"Authorization":("Bearer " + $token)},"expires_in_sec":$exp}'
+    '{"headers":{"Authorization":("Bearer " + $token)},
+      "append_headers":{"anthropic-beta":"oauth-2025-04-20"},
+      "expires_in_sec":$exp}'

@@ -34,10 +34,11 @@ type hookCtx struct {
 
 // hookResponse is the JSON structure parsed from hook subprocess stdout.
 type hookResponse struct {
-	Headers      map[string]string `json:"headers"`
-	Query        map[string]string `json:"query"`
-	ExpiresInSec int               `json:"expires_in_sec"`
-	BodyReplace  json.RawMessage   `json:"body_replace,omitempty"`
+	Headers       map[string]string `json:"headers"`
+	AppendHeaders map[string]string `json:"append_headers"`
+	Query         map[string]string `json:"query"`
+	ExpiresInSec  int               `json:"expires_in_sec"`
+	BodyReplace   json.RawMessage   `json:"body_replace,omitempty"`
 }
 
 // Provider implements credproxy.Provider by executing hook scripts.

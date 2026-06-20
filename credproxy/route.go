@@ -172,6 +172,9 @@ func applyPlan(r *http.Request, body []byte, p requestPlan) *http.Request {
 	for k, v := range p.setHeaders {
 		req.Header.Set(k, v)
 	}
+	for k, v := range p.mergeHeaders {
+		req.Header.Set(k, mergeCSV(req.Header.Get(k), v))
+	}
 	if len(p.setQuery) > 0 {
 		q := req.URL.Query()
 		for k, v := range p.setQuery {

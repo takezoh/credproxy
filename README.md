@@ -169,10 +169,13 @@ Hooks receive a JSON object on stdin and must write a JSON object to stdout:
 ```json
 {
   "headers": {"Authorization": "Bearer <access-token>"},
+  "append_headers": {"anthropic-beta": "oauth-2025-04-20"},
   "expires_in_sec": 3600
 }
 ```
 
+- `headers` → set on the upstream request, replacing any existing value
+- `append_headers` → merged into the existing comma-separated header value (e.g. `anthropic-beta`) instead of overwriting it; useful when the client already sends values for the same header. Tokens already present are not duplicated
 - `expires_in_sec > 30` → ScriptProvider caches the response; the hook is not re-executed until TTL expires
 - `body_replace` → returned as-is to the client, upstream not contacted
 - Non-zero exit → 502 to client

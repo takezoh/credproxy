@@ -21,8 +21,9 @@ func parseHookResponse(stdout []byte, now time.Time, safety time.Duration) (*cre
 	}
 
 	inj := &credproxy.Injection{
-		Headers: resp.Headers,
-		Query:   resp.Query,
+		Headers:       resp.Headers,
+		AppendHeaders: resp.AppendHeaders,
+		Query:         resp.Query,
 	}
 
 	// Normalize body_replace: null JSON token and empty object are treated as absent.

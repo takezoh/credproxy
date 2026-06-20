@@ -64,6 +64,65 @@ func TestRouteHandler_injectsHeaders(t *testing.T) {
 	}
 }
 
+func TestRouteHandler_appendHeadersMergesWithClientValue(t *testing.T) {
+	// AppendHeaders must merge into the client's existing comma-separated header
+	// (e.g. anthropic-beta) instead of overwriting it, and must not duplicate a
+	// token the client already sent.
+	var gotBeta string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBeta = r.Header.Get("Anthropic-Beta")
+	}))
+	defer upstream.Close()
+
+	addr := startRouteTestServer(t, credproxy.Route{
+		Path:     "/api",
+		Upstream: upstream.URL,
+		Provider: &fakeProvider{inj: &credproxy.Injection{
+			Headers:       map[string]string{"Authorization": "Bearer injected"},
+			AppendHeaders: map[string]string{"anthropic-beta": "oauth-2025-04-20"},
+		}},
+	})
+
+	req, _ := http.NewRequest(http.MethodPost, "http://"+addr+"/api/v1/messages", nil)
+	req.Header.Set("anthropic-beta", "fine-grained-tool-streaming-2025-05-14, context-1m-2025-08-07")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	want := "fine-grained-tool-streaming-2025-05-14, context-1m-2025-08-07, oauth-2025-04-20"
+	if gotBeta != want {
+		t.Errorf("anthropic-beta = %q, want %q", gotBeta, want)
+	}
+}
+
+func TestRouteHandler_appendHeadersWhenAbsent(t *testing.T) {
+	// When the client sends no value, AppendHeaders just sets the injected token.
+	var gotBeta string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBeta = r.Header.Get("Anthropic-Beta")
+	}))
+	defer upstream.Close()
+
+	addr := startRouteTestServer(t, credproxy.Route{
+		Path:     "/api",
+		Upstream: upstream.URL,
+		Provider: &fakeProvider{inj: &credproxy.Injection{
+			AppendHeaders: map[string]string{"anthropic-beta": "oauth-2025-04-20"},
+		}},
+	})
+
+	resp, err := http.Post("http://"+addr+"/api/v1/messages", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	_ = resp.Body.Close()
+	if gotBeta != "oauth-2025-04-20" {
+		t.Errorf("anthropic-beta = %q, want %q", gotBeta, "oauth-2025-04-20")
+	}
+}
+
 func TestRouteHandler_stripInboundAuth(t *testing.T) {
 	var gotAuth string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
