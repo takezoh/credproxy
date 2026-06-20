@@ -44,6 +44,21 @@ func TestScriptProvider_Get_cached(t *testing.T) {
 	}
 }
 
+func TestScriptProvider_Get_appendHeaders(t *testing.T) {
+	cmd := writeScript(t, `echo '{"headers":{"Authorization":"Bearer tok"},"append_headers":{"anthropic-beta":"oauth-2025-04-20"},"expires_in_sec":3600}'`)
+	p := script.New("test", cmd, nil, 5*time.Second)
+	inj, err := p.Get(context.Background(), credproxy.Request{Method: "GET"})
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if inj.Headers["Authorization"] != "Bearer tok" {
+		t.Errorf("Authorization = %q", inj.Headers["Authorization"])
+	}
+	if inj.AppendHeaders["anthropic-beta"] != "oauth-2025-04-20" {
+		t.Errorf("AppendHeaders = %v", inj.AppendHeaders)
+	}
+}
+
 func TestScriptProvider_Refresh_bypassesCache(t *testing.T) {
 	getCmd := writeScript(t, `echo '{"headers":{"X-From":"get"},"expires_in_sec":3600}'`)
 	refreshCmd := writeScript(t, `echo '{"headers":{"X-From":"refresh"},"expires_in_sec":3600}'`)
