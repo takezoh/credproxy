@@ -76,12 +76,52 @@ func TestPlanRequest(t *testing.T) {
 		}
 	})
 
+	t.Run("AppendHeaders populate mergeHeaders", func(t *testing.T) {
+		inj := &Injection{
+			Headers:       map[string]string{"Authorization": "Bearer tok"},
+			AppendHeaders: map[string]string{"anthropic-beta": "oauth-2025-04-20"},
+		}
+		p := planRequest(Route{}, inj)
+		if p.setHeaders["Authorization"] != "Bearer tok" {
+			t.Errorf("Authorization not set: %v", p.setHeaders)
+		}
+		if p.mergeHeaders["anthropic-beta"] != "oauth-2025-04-20" {
+			t.Errorf("mergeHeaders = %v, want anthropic-beta", p.mergeHeaders)
+		}
+	})
+
 	t.Run("empty injection", func(t *testing.T) {
 		p := planRequest(Route{}, &Injection{})
-		if len(p.setHeaders) != 0 || len(p.setQuery) != 0 {
+		if len(p.setHeaders) != 0 || len(p.setQuery) != 0 || len(p.mergeHeaders) != 0 {
 			t.Errorf("unexpected non-empty plan: %+v", p)
 		}
 	})
+}
+
+func TestMergeCSV(t *testing.T) {
+	tests := []struct {
+		name     string
+		existing string
+		add      string
+		want     string
+	}{
+		{"empty existing", "", "oauth-2025-04-20", "oauth-2025-04-20"},
+		{"append to existing", "fine-grained-tool-streaming-2025-05-14", "oauth-2025-04-20",
+			"fine-grained-tool-streaming-2025-05-14, oauth-2025-04-20"},
+		{"dedup already present", "oauth-2025-04-20, context-1m-2025-08-07", "oauth-2025-04-20",
+			"oauth-2025-04-20, context-1m-2025-08-07"},
+		{"trims spaces", "a ,  b", "c", "a, b, c"},
+		{"empty add keeps existing", "a, b", "", "a, b"},
+		{"both empty", "", "", ""},
+		{"multi-token add", "a", "b, c", "a, b, c"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := mergeCSV(tt.existing, tt.add); got != tt.want {
+				t.Errorf("mergeCSV(%q, %q) = %q, want %q", tt.existing, tt.add, got, tt.want)
+			}
+		})
+	}
 }
 
 func TestNeedsRefresh(t *testing.T) {

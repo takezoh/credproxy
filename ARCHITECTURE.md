@@ -90,10 +90,11 @@ type Request struct {
 }
 
 type Injection struct {
-    Headers     map[string]string
-    Query       map[string]string
-    BodyReplace []byte    // non-nil → return directly, skip upstream
-    ExpiresAt   time.Time // informational; caching is Provider's responsibility
+    Headers       map[string]string
+    AppendHeaders map[string]string // merged into existing comma-separated header values (e.g. anthropic-beta), preserving client tokens
+    Query         map[string]string
+    BodyReplace   []byte    // non-nil → return directly, skip upstream
+    ExpiresAt     time.Time // informational; caching is Provider's responsibility
 }
 ```
 
@@ -113,6 +114,7 @@ stdout (one-line JSON):
 ```json
 {
   "headers": {"Authorization": "Bearer <access-token>"},
+  "append_headers": {"anthropic-beta": "oauth-2025-04-20"},
   "query": {},
   "expires_in_sec": 3600,
   "body_replace": {}
@@ -122,6 +124,8 @@ stdout (one-line JSON):
 Rules:
 - exit 0 → OK; non-zero → proxy returns 502 to client
 - timeout (default 10 s) → 502
+- `headers` → set on the upstream request, replacing any existing value
+- `append_headers` → merged into the existing comma-separated header value (e.g. `anthropic-beta`) rather than replacing it; tokens the client already sent are not duplicated
 - `expires_in_sec > 30` → ScriptProvider caches result for `expires_in_sec - 30` seconds
 - `body_replace` non-nil → proxy returns it as the response body, skips upstream forward
 
