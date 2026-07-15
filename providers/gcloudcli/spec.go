@@ -75,6 +75,24 @@ func (b *SpecBuilder) Init() error {
 	return nil
 }
 
+// Materialize is the SSOT write path for the gcloud-token credential file.
+// It fetches a fresh access token via `gcloud auth print-access-token` (or the
+// SA impersonation variant), then writes it to the projectPath's registered
+// tokenFilePath. Idempotent (the file's observable state after any successful
+// call is a valid token). Does not retry internally: callers own the retry
+// envelope (see adr-20260715-credproxy-retry-owner-caller-side). Returns nil
+// when projectPath has no gcloud wiring (i.e. ContainerSpec returned zero Spec
+// for it).
+func (b *SpecBuilder) Materialize(ctx context.Context, projectPath string) error {
+	b.mu.Lock()
+	target, ok := b.tokenTargets[projectPath]
+	b.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	return b.writeTokenFile(ctx, target)
+}
+
 // RegisterPeriodic implements container.PeriodicRegistrar.
 // It registers a job that refreshes all known token files every 25 minutes.
 func (b *SpecBuilder) RegisterPeriodic(srv *credproxylib.Server) {
@@ -85,22 +103,29 @@ func (b *SpecBuilder) RegisterPeriodic(srv *credproxylib.Server) {
 	})
 }
 
+// refreshAllTokens is a thin adapter over Materialize: it iterates every
+// registered projectPath and invokes the same SSOT write path. Failures are
+// logged and do not abort the sweep (each project is independent).
 func (b *SpecBuilder) refreshAllTokens(ctx context.Context) error {
 	b.mu.Lock()
-	targets := make([]tokenTarget, 0, len(b.tokenTargets))
-	for _, t := range b.tokenTargets {
-		targets = append(targets, t)
+	projects := make([]string, 0, len(b.tokenTargets))
+	for p := range b.tokenTargets {
+		projects = append(projects, p)
 	}
 	b.mu.Unlock()
 
-	for _, t := range targets {
-		if err := b.writeTokenFile(ctx, t); err != nil {
-			slog.Warn("gcloudcli: token refresh failed", "path", t.tokenFilePath, "err", err)
+	for _, p := range projects {
+		if err := b.Materialize(ctx, p); err != nil {
+			slog.Warn("gcloudcli: token refresh failed", "project", p, "err", err)
 		}
 	}
 	return nil
 }
 
+// writeTokenFile is Materialize's internal write step. It is unexported: all
+// external write paths go through Materialize so the SSOT contract holds. No
+// direct os.WriteFile(tokenHostPath, ...) call is allowed outside this
+// function per adr-20260715-credproxy-materialize-method.
 func (b *SpecBuilder) writeTokenFile(ctx context.Context, t tokenTarget) error {
 	token, err := b.gcpToken(ctx, t.account, t.sa)
 	if err != nil {
@@ -177,6 +202,11 @@ func (b *SpecBuilder) ContainerSpec(_ context.Context, projectPath string) (cont
 	}, nil
 }
 
+// ensureMetadataServer sets up wiring (unix listener + http server) for a
+// projectPath and registers its tokenTarget so periodic refresh and the metadata
+// handler can find it. It does NOT write the token file — that is Materialize's
+// responsibility, invoked separately by the caller (see
+// adr-20260715-credproxy-materialize-method).
 func (b *SpecBuilder) ensureMetadataServer(projectPath, account, sa, project, sockPath, tokenFilePath string) error {
 	b.mu.Lock()
 	if _, running := b.tokenTargets[projectPath]; running {
@@ -193,8 +223,15 @@ func (b *SpecBuilder) ensureMetadataServer(projectPath, account, sa, project, so
 		return fmt.Errorf("gcloudcli: listen metadata sock: %w", err)
 	}
 	b.tokenTargets[projectPath] = tokenTarget{account: account, sa: sa, tokenFilePath: tokenFilePath}
+	// Metadata handler triggers Materialize asynchronously after each successful
+	// token fetch (see adr-20260715-credproxy-metadata-handler-async-materialize)
+	// — HTTP response reflects token fetch only; file-write outcome is observed
+	// via Materialize's error return and periodic refresh, not via the endpoint.
+	materialize := func(ctx context.Context) error {
+		return b.Materialize(ctx, projectPath)
+	}
 	srv := &http.Server{
-		Handler:      metadataHandler(account, sa, project, tokenFilePath),
+		Handler:      metadataHandler(account, sa, project, materialize),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 35 * time.Second,
 	}
@@ -209,12 +246,6 @@ func (b *SpecBuilder) ensureMetadataServer(projectPath, account, sa, project, so
 	}()
 	slog.Debug("gcloudcli: metadata server started", "project", projectPath, "sock", sockPath)
 	b.mu.Unlock()
-
-	// Pre-populate token file outside the lock; gcloud exec may take hundreds of ms.
-	target := tokenTarget{account: account, sa: sa, tokenFilePath: tokenFilePath}
-	if err := b.writeTokenFile(b.rootCtx, target); err != nil {
-		slog.Warn("gcloudcli: initial token write failed", "err", err)
-	}
 	return nil
 }
 

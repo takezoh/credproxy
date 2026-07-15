@@ -4,10 +4,11 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
-	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 const (
@@ -38,9 +39,12 @@ type tokenResponse struct {
 }
 
 // metadataHandler returns an http.Handler that emulates the GCE metadata server.
-// tokenFilePath, if non-empty, is a host-side path that receives each fresh token
-// so that gcloud CLI's auth/access_token_file stays current.
-func metadataHandler(account, serviceAccount, project, tokenFilePath string) http.Handler {
+// After each successful token-fetch response, materialize (if non-nil) is invoked
+// asynchronously so gcloud CLI's auth/access_token_file stays current. The HTTP
+// response itself reflects only the token fetch outcome — file-write success is
+// observed via materialize's error path and the periodic refresh sweep, not the
+// endpoint (see adr-20260715-credproxy-metadata-handler-async-materialize).
+func metadataHandler(account, serviceAccount, project string, materialize func(context.Context) error) http.Handler {
 	mux := http.NewServeMux()
 	principal := cmp.Or(serviceAccount, account)
 
@@ -74,8 +78,14 @@ func metadataHandler(account, serviceAccount, project, tokenFilePath string) htt
 				http.Error(w, "token fetch failed", http.StatusInternalServerError)
 				return
 			}
-			if tokenFilePath != "" {
-				_ = os.WriteFile(tokenFilePath, []byte(token), 0o600)
+			if materialize != nil {
+				go func() {
+					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					defer cancel()
+					if err := materialize(ctx); err != nil {
+						slog.Warn("gcloudcli: async materialize after metadata token fetch failed", "err", err)
+					}
+				}()
 			}
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(tokenResponse{ //nolint:errcheck

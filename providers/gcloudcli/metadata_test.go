@@ -21,7 +21,7 @@ func stubGcloudForMetadata(t *testing.T, token string) {
 }
 
 func TestMetadataHandler_rootPing_missingFlavor(t *testing.T) {
-	h := metadataHandler("user@example.com", "", "proj-x", "")
+	h := metadataHandler("user@example.com", "", "proj-x", nil)
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	h.ServeHTTP(w, r)
@@ -31,7 +31,7 @@ func TestMetadataHandler_rootPing_missingFlavor(t *testing.T) {
 }
 
 func TestMetadataHandler_rootPing_returnsFlavorHeader(t *testing.T) {
-	h := metadataHandler("user@example.com", "", "proj-x", "")
+	h := metadataHandler("user@example.com", "", "proj-x", nil)
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	r.Header.Set("Metadata-Flavor", "Google")
@@ -45,7 +45,7 @@ func TestMetadataHandler_rootPing_returnsFlavorHeader(t *testing.T) {
 }
 
 func TestMetadataHandler_unknownPath_notFound(t *testing.T) {
-	h := metadataHandler("user@example.com", "", "proj-x", "")
+	h := metadataHandler("user@example.com", "", "proj-x", nil)
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/unknown/path", nil)
 	r.Header.Set("Metadata-Flavor", "Google")
@@ -56,7 +56,7 @@ func TestMetadataHandler_unknownPath_notFound(t *testing.T) {
 }
 
 func TestMetadataHandler_serviceAccountInfo_returnsEmailAndScopes(t *testing.T) {
-	h := metadataHandler("user@example.com", "sa@proj.iam.gserviceaccount.com", "proj-x", "")
+	h := metadataHandler("user@example.com", "sa@proj.iam.gserviceaccount.com", "proj-x", nil)
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/computeMetadata/v1/instance/service-accounts/default/?recursive=true", nil)
 	r.Header.Set("Metadata-Flavor", "Google")
@@ -81,7 +81,7 @@ func TestMetadataHandler_serviceAccountInfo_returnsEmailAndScopes(t *testing.T) 
 }
 
 func TestMetadataHandler_tokenEndpoint_missingFlavor(t *testing.T) {
-	h := metadataHandler("user@example.com", "", "proj-x", "")
+	h := metadataHandler("user@example.com", "", "proj-x", nil)
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, metadataTokenPath, nil)
 	h.ServeHTTP(w, r)
@@ -92,7 +92,7 @@ func TestMetadataHandler_tokenEndpoint_missingFlavor(t *testing.T) {
 
 func TestMetadataHandler_tokenEndpoint_returnsToken(t *testing.T) {
 	stubGcloudForMetadata(t, "test-access-token-xyz")
-	h := metadataHandler("user@example.com", "", "proj-x", "")
+	h := metadataHandler("user@example.com", "", "proj-x", nil)
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, metadataTokenPath, nil)
 	r.Header.Set("Metadata-Flavor", "Google")
@@ -120,7 +120,7 @@ func TestMetadataHandler_tokenEndpoint_returnsToken(t *testing.T) {
 }
 
 func TestMetadataHandler_emailEndpoint(t *testing.T) {
-	h := metadataHandler("user@example.com", "sa@proj.iam.gserviceaccount.com", "proj-x", "")
+	h := metadataHandler("user@example.com", "sa@proj.iam.gserviceaccount.com", "proj-x", nil)
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, metadataEmailPath, nil)
 	r.Header.Set("Metadata-Flavor", "Google")
@@ -135,7 +135,7 @@ func TestMetadataHandler_emailEndpoint(t *testing.T) {
 }
 
 func TestMetadataHandler_projectEndpoint(t *testing.T) {
-	h := metadataHandler("user@example.com", "", "my-project-123", "")
+	h := metadataHandler("user@example.com", "", "my-project-123", nil)
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, metadataProjectPath, nil)
 	r.Header.Set("Metadata-Flavor", "Google")
@@ -204,7 +204,7 @@ echo "user-token"
 	}
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
 
-	h := metadataHandler("user@example.com", "sa@proj.iam.gserviceaccount.com", "proj-x", "")
+	h := metadataHandler("user@example.com", "sa@proj.iam.gserviceaccount.com", "proj-x", nil)
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, metadataTokenPath, nil)
 	r.Header.Set("Metadata-Flavor", "Google")
@@ -222,7 +222,7 @@ echo "user-token"
 func TestMetadataHandler_tokenEndpoint_principalEmailPath_returnsToken(t *testing.T) {
 	stubGcloudForMetadata(t, "test-principal-token")
 
-	h := metadataHandler("user@example.com", "", "proj-x", "")
+	h := metadataHandler("user@example.com", "", "proj-x", nil)
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, metadataSABase+"user@example.com"+metadataTokenSuffix, nil)
 	r.Header.Set("Metadata-Flavor", "Google")
@@ -256,7 +256,7 @@ echo "user-token"
 	}
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
 
-	h := metadataHandler("user@example.com", "sa@proj.iam.gserviceaccount.com", "proj-x", "")
+	h := metadataHandler("user@example.com", "sa@proj.iam.gserviceaccount.com", "proj-x", nil)
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, metadataSABase+"sa@proj.iam.gserviceaccount.com"+metadataTokenSuffix, nil)
 	r.Header.Set("Metadata-Flavor", "Google")
@@ -275,7 +275,7 @@ echo "user-token"
 }
 
 func TestMetadataHandler_emailEndpoint_principalEmailPath(t *testing.T) {
-	h := metadataHandler("user@example.com", "sa@proj.iam.gserviceaccount.com", "proj-x", "")
+	h := metadataHandler("user@example.com", "sa@proj.iam.gserviceaccount.com", "proj-x", nil)
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, metadataSABase+"sa@proj.iam.gserviceaccount.com"+metadataEmailSuffix, nil)
 	r.Header.Set("Metadata-Flavor", "Google")
@@ -290,7 +290,7 @@ func TestMetadataHandler_emailEndpoint_principalEmailPath(t *testing.T) {
 }
 
 func TestMetadataHandler_unknownEmailPath_notFound(t *testing.T) {
-	h := metadataHandler("user@example.com", "", "proj-x", "")
+	h := metadataHandler("user@example.com", "", "proj-x", nil)
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, metadataSABase+"other@example.com"+metadataTokenSuffix, nil)
 	r.Header.Set("Metadata-Flavor", "Google")

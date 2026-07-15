@@ -65,6 +65,12 @@ func NewSpecBuilder(ctx context.Context, cfg Config, keysFor func(string) []stri
 
 func (b *SpecBuilder) Name() string { return "sshagent" }
 
+// Materialize is a no-op for sshagent: credential access is mediated by an
+// ephemeral ssh-agent subprocess bound to a Unix socket exposed via
+// ContainerSpec's Mounts, not by a host-side credential file this provider
+// writes. See container.Provider docs for the Materialize contract.
+func (b *SpecBuilder) Materialize(_ context.Context, _ string) error { return nil }
+
 // Init creates RunBase.
 func (b *SpecBuilder) Init() error {
 	return os.MkdirAll(b.cfg.RunBase, 0o700)

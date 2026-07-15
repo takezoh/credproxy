@@ -45,6 +45,11 @@ func NewSpecBuilder(cfg Config, profilesFor func(string) []string, tokenFor func
 
 func (b *SpecBuilder) Name() string { return "awssso" }
 
+// Materialize is a no-op for awssso: the actual credentials flow through the
+// HTTP route registered by Routes(), not through a host-side credential file.
+// See container.Provider docs for the Materialize contract.
+func (b *SpecBuilder) Materialize(_ context.Context, _ string) error { return nil }
+
 // Init creates HostRunBase. Idempotent.
 func (b *SpecBuilder) Init() error {
 	if err := os.MkdirAll(b.cfg.HostRunBase, 0o700); err != nil {
