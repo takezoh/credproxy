@@ -248,4 +248,4 @@ env, err := resolver.ResolveFile(ctx, ".secrets.env")
 
 ## Architecture
 
-See [ARCHITECTURE.md](ARCHITECTURE.md).
+Governing architecture is maintained in [`docs/design/`](docs/design/), with decision history in [`docs/adr/`](docs/adr/).
