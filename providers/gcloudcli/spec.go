@@ -202,6 +202,30 @@ func (b *SpecBuilder) ContainerSpec(_ context.Context, projectPath string) (cont
 	}, nil
 }
 
+// metadataListen opens the transport a project's metadata server serves on.
+// Production has exactly one: the per-project Unix socket inside that project's
+// 0700 run dir, which is bound into the container and is the access control, so
+// no other listener kind is offered here.
+//
+// It is a package-level variable purely so tests can substitute a loopback
+// listener. Registration of a project's tokenTarget happens only once this
+// succeeds, so in a sandbox that denies AF_UNIX every test of registration,
+// deduplication, per-project isolation and the refresh sweep would be
+// unrunnable — the listener is what those tests must get past, not what they
+// check. The seam still receives the socket path, and tests assert on it, so a
+// builder binding the wrong path cannot pass unnoticed. Nothing outside tests
+// reassigns it.
+var metadataListen = func(sockPath string) (net.Listener, error) {
+	if err := removeExistingSocket(sockPath); err != nil {
+		return nil, err
+	}
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		return nil, fmt.Errorf("gcloudcli: listen metadata sock: %w", err)
+	}
+	return ln, nil
+}
+
 // ensureMetadataServer sets up wiring (unix listener + http server) for a
 // projectPath and registers its tokenTarget so periodic refresh and the metadata
 // handler can find it. It does NOT write the token file — that is Materialize's
@@ -213,14 +237,10 @@ func (b *SpecBuilder) ensureMetadataServer(projectPath, account, sa, project, so
 		b.mu.Unlock()
 		return nil
 	}
-	if err := removeExistingSocket(sockPath); err != nil {
-		b.mu.Unlock()
-		return err
-	}
-	ln, err := net.Listen("unix", sockPath)
+	ln, err := metadataListen(sockPath)
 	if err != nil {
 		b.mu.Unlock()
-		return fmt.Errorf("gcloudcli: listen metadata sock: %w", err)
+		return err
 	}
 	b.tokenTargets[projectPath] = tokenTarget{account: account, sa: sa, tokenFilePath: tokenFilePath}
 	// Metadata handler triggers Materialize asynchronously after each successful
