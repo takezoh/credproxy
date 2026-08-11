@@ -2,6 +2,7 @@ package credproxy
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
@@ -14,6 +15,14 @@ import (
 
 const defaultShutdownTimeout = 15 * time.Second
 const defaultUnixMode = 0o600
+
+// reservedPaths are endpoints the server itself owns. A configured route may
+// not claim one: silently shadowing liveness or discovery would turn a config
+// typo into a broken control, so New() rejects the collision instead.
+var reservedPaths = map[string]bool{
+	"/healthz": true,
+	"/_routes": true,
+}
 
 // tokenEntry stores a single bearer token and its caller-assigned identifier.
 type tokenEntry struct {
@@ -204,7 +213,11 @@ func (s *Server) registerRoutes() error {
 	s.mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	})
+	s.mux.Handle("/_routes", s.authMiddleware(http.HandlerFunc(s.handleRouteList)))
 	for _, r := range s.cfg.Routes {
+		if reservedPaths[strings.TrimSuffix(r.Path, "/")] {
+			return fmt.Errorf("credproxy: route %s: path is reserved by the server", r.Path)
+		}
 		h, err := newRouteHandler(r, s.log)
 		if err != nil {
 			return fmt.Errorf("credproxy: route %s: %w", r.Path, err)
@@ -216,6 +229,36 @@ func (s *Server) registerRoutes() error {
 		s.mux.Handle(pattern, s.authMiddleware(http.StripPrefix(r.Path, h)))
 	}
 	return nil
+}
+
+// handleRouteList answers the reserved /_routes endpoint with the routes this
+// caller may fetch a credential body from, so a client can consume every route
+// without being told their names out of band — adding a credential becomes a
+// route definition, not a change on both sides.
+//
+// Two filters apply. Routes with an upstream are omitted because discovery must
+// have no side effects: a client that probed one would send a real request to
+// the upstream with a real credential attached. Routes restricted by
+// AllowedClientIDs are omitted for callers not on the list, so the listing never
+// advertises what the caller would only get a 403 from.
+//
+// Route names carry no secret: a client must already know a name to use it.
+func (s *Server) handleRouteList(w http.ResponseWriter, r *http.Request) {
+	clientID, _ := r.Context().Value(tokenIDKey{}).(string)
+	names := make([]string, 0, len(s.cfg.Routes))
+	for _, rt := range s.cfg.Routes {
+		if rt.Upstream != "" {
+			continue
+		}
+		if len(rt.AllowedClientIDs) > 0 && !clientAllowed(rt.AllowedClientIDs, clientID) {
+			continue
+		}
+		names = append(names, strings.TrimPrefix(strings.TrimSuffix(rt.Path, "/"), "/"))
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(struct {
+		Routes []string `json:"routes"`
+	}{Routes: names})
 }
 
 func (s *Server) openListeners() error {

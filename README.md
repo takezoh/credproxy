@@ -152,6 +152,25 @@ allowed_client_ids = ["ci-runner"]
 Token id is attribution; `allowed_client_ids` is what turns it into
 authorization.
 
+#### Reserved endpoints
+
+`/healthz` (liveness) and `/_routes` (route discovery) belong to the server. A
+configured route may not claim either path — the daemon refuses to start rather
+than let a config typo silently shadow one.
+
+`/_routes` requires the same authentication as any route and answers with the
+routes **this caller** may fetch a credential body from:
+
+```json
+{"routes": ["ctx-sync", "grok-x-search"]}
+```
+
+Names are paths without the leading slash — the same spelling hooks receive as
+`route`. Two kinds of route are omitted: routes with an `upstream` (discovery
+must have no side effects, and probing one would send a real request upstream
+with a real credential attached) and routes whose `allowed_client_ids` exclude
+the caller (the listing states what the caller may fetch, not what exists).
+
 Start:
 
 ```sh
@@ -292,6 +311,41 @@ pick *which wrapper to call*, never *which secret to resolve*. The resolved
 secret still enters the child's environment, so `exec` narrows the attack
 surface (no arbitrary ref/env-file, no `resolve`-style stdout dump) but does not
 hide the value from the child process itself.
+
+## credproxy env — export every broker route's env into a shell
+
+`credproxy env` fetches the env map of every env-serving broker route and prints
+it as shell exports. It exists so that adding a credential is a route definition
+on the daemon side and nothing else: the consumer stays one fixed line that is
+never edited again.
+
+```sh
+# ~/.zshrc — unchanged when a key is added, removed, or rotated
+eval "$(credproxy env --token-file ~/.config/credproxyd/token)"
+```
+
+```
+credproxy env [--socket S] [--token-file F] [--route R]... [--format sh|json] [--timeout-sec N]
+```
+
+- `--socket` defaults to `$XDG_RUNTIME_DIR/credproxyd/broker.sock` (or
+  `/run/user/<uid>/credproxyd/broker.sock` when `XDG_RUNTIME_DIR` is unset).
+- Without `--route`, the routes come from `/_routes` (see Reserved endpoints) and
+  their env maps are merged. A route whose body has no `env` key is skipped
+  silently — it serves some other credential shape, which is not a failure.
+- `--route` may be repeated to pin an explicit set instead.
+- `--format sh` (default) prints `export NAME='value'`, single-quoted so that
+  newlines, spaces, `$(...)`, backticks and backslashes survive `eval` verbatim.
+  A variable whose name is not a plain identifier is dropped rather than quoted.
+- `--format json` prints `{"env":{...}}`, the same schema as `resolve`.
+
+**Degrades quietly by design.** A missing socket, an unreachable broker, an
+absent token file, or a route that fails with a typed `reason` never produce
+output on stdout and never a non-zero exit — the other routes still export.
+This runs in shell startup, where a hard failure costs the user their shell
+rather than one credential. Diagnostics go to stderr and name only the route and
+the reason; values reach stdout and nowhere else — not argv, not the log, not an
+error message.
 
 ## secretenv — resolver library
 

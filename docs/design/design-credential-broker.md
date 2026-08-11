@@ -41,6 +41,11 @@ invariants:
   statement: Only a hook's typed reason token reaches the client 502 body; hook stderr
     detail never crosses the client boundary.
   enforcement: test
+- id: INV-007
+  statement: Route discovery is side-effect free and caller-scoped — it lists only
+    routes the server answers locally and the caller is allowed to use — and a configured
+    route may not claim a server-reserved path.
+  enforcement: test
 boundaries:
   provides:
   - authenticated HTTP proxy routes and synthetic credential endpoints
@@ -79,10 +84,11 @@ relations: []
 source_paths:
 - credproxy/types.go
 - credproxy/server.go
+- cmd/credproxy/env.go
 - secretenv/resolver.go
 summary: Provider-agnostic authenticated credential injection, forwarding, and secret-resolution
   architecture.
-updated: '2026-07-16'
+updated: '2026-08-12'
 ---
 
 ## Purpose
@@ -95,7 +101,7 @@ The core authenticates a client, matches a route, asks a Provider for an Injecti
 
 ## Boundaries
 
-The `credproxy` package owns HTTP behavior only. `container/` describes per-launch mounts and environment, `providers/` implements reusable backends, `secretenv/` resolves opaque references, and command packages own user-facing processes. `credproxy exec` fetches a daemon-defined route's env map over the Unix socket and injects it into a child process — the caller chooses only the route name, never the refs behind it.
+The `credproxy` package owns HTTP behavior only. `container/` describes per-launch mounts and environment, `providers/` implements reusable backends, `secretenv/` resolves opaque references, and command packages own user-facing processes. `credproxy exec` fetches a daemon-defined route's env map over the Unix socket and injects it into a child process — the caller chooses only the route name, never the refs behind it. `credproxy env` removes even that choice: it discovers the caller's routes through the reserved `/_routes` endpoint and exports their env maps, so a credential is added by defining a route and the consumer side never changes.
 
 ## Invariants
 
@@ -105,6 +111,8 @@ The `credproxy` package owns HTTP behavior only. `container/` describes per-laun
 - A route may be restricted to named clients (`AllowedClientIDs`); token id is attribution, the restriction is what makes it authorization.
 - A Unix-socket server may require same-UID peers (`RequireSamePeerUID`) as defense-in-depth over the 0600 socket, failing closed where peer credentials cannot be read.
 - Hook failures may carry a machine-readable `reason` to the client; only the reason token crosses the boundary, so a hook cannot leak a secret through the error path.
+- `/healthz` and `/_routes` are server-owned paths; a route that collides with one is a startup error, not a shadowed control.
+- Discovery never triggers an upstream request and never advertises a route the caller could not use, so listing routes costs nothing and reveals nothing beyond what the caller may already fetch.
 
 ## Collaboration
 

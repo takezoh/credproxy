@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -28,26 +27,11 @@ func (p *envProvider) Refresh(ctx context.Context, req credproxy.Request) (*cred
 	return p.Get(ctx, req)
 }
 
-// startUnixBroker runs a credproxy server on a Unix socket in a temp dir.
+// startUnixBroker runs a credproxy server with a single "/ctx-sync" route on a
+// Unix socket in a temp dir.
 func startUnixBroker(t *testing.T, provider credproxy.Provider, tokens []credproxy.TokenAuth) string {
 	t.Helper()
-	sock := filepath.Join(t.TempDir(), "broker.sock")
-	cfg := credproxy.ServerConfig{
-		ListenUnix: sock,
-		AuthTokens: tokens,
-		Routes:     []credproxy.Route{{Path: "/ctx-sync", Provider: provider}},
-	}
-	if len(tokens) == 0 {
-		cfg.AllowUnauthenticated = true
-	}
-	srv, err := credproxy.New(cfg)
-	if err != nil {
-		t.Fatalf("credproxy.New: %v", err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	go func() { _ = srv.Run(ctx) }()
-	return sock
+	return startUnixBrokerRoutes(t, []credproxy.Route{{Path: "/ctx-sync", Provider: provider}}, tokens)
 }
 
 func TestFetchEnv_success(t *testing.T) {

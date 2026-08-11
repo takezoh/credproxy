@@ -88,9 +88,10 @@ func validRouteName(s string) bool {
 	return true
 }
 
-// fetchEnv requests the route's env map from credproxyd over the Unix socket.
-// The response uses the same {"env":{...}} schema as "credproxy resolve".
-func fetchEnv(ctx context.Context, socketPath, route, token string, timeout time.Duration) (map[string]string, error) {
+// brokerGet performs an authenticated GET against the broker's Unix socket and
+// returns the response on 200, or a typed error otherwise. path is appended to
+// the fixed host and must already be caller-validated.
+func brokerGet(ctx context.Context, socketPath, path, token string, timeout time.Duration) (*http.Response, error) {
 	client := &http.Client{
 		Timeout: timeout,
 		Transport: &http.Transport{
@@ -101,7 +102,7 @@ func fetchEnv(ctx context.Context, socketPath, route, token string, timeout time
 		},
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://credproxyd/"+route+"/", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://credproxyd/"+path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("broker request: %w", err)
 	}
@@ -113,11 +114,23 @@ func fetchEnv(ctx context.Context, socketPath, route, token string, timeout time
 	if err != nil {
 		return nil, fmt.Errorf("broker %s: %w", socketPath, err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	if resp.StatusCode != http.StatusOK {
+		defer func() { _ = resp.Body.Close() }()
 		return nil, brokerError(resp)
 	}
+	return resp, nil
+}
+
+// fetchRouteEnv requests one route's body from credproxyd and returns its env
+// map, using the same {"env":{...}} schema as "credproxy resolve". A body
+// without an "env" key yields (nil, nil): that route serves some other
+// credential shape (e.g. a synthetic AWS endpoint) and is not an env source.
+func fetchRouteEnv(ctx context.Context, socketPath, route, token string, timeout time.Duration) (map[string]string, error) {
+	resp, err := brokerGet(ctx, socketPath, route+"/", token, timeout)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
 
 	var out struct {
 		Env map[string]string `json:"env"`
@@ -126,10 +139,20 @@ func fetchEnv(ctx context.Context, socketPath, route, token string, timeout time
 	if err := dec.Decode(&out); err != nil {
 		return nil, fmt.Errorf("broker response: %w", err)
 	}
-	if out.Env == nil {
+	return out.Env, nil
+}
+
+// fetchEnv is the strict variant used by "exec", where a route that serves no
+// env is a misconfiguration rather than something to skip.
+func fetchEnv(ctx context.Context, socketPath, route, token string, timeout time.Duration) (map[string]string, error) {
+	env, err := fetchRouteEnv(ctx, socketPath, route, token, timeout)
+	if err != nil {
+		return nil, err
+	}
+	if env == nil {
 		return nil, fmt.Errorf("broker response: missing env")
 	}
-	return out.Env, nil
+	return env, nil
 }
 
 // brokerError extracts the machine-readable reason from a structured error

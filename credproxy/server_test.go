@@ -2,6 +2,7 @@ package credproxy_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -68,6 +69,108 @@ func TestServer_healthz(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+// getRouteList calls the reserved discovery endpoint and returns the names.
+func getRouteList(t *testing.T, addr, token string) (int, []string) {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s/_routes", addr), nil)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /_routes: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return resp.StatusCode, nil
+	}
+	var out struct {
+		Routes []string `json:"routes"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return resp.StatusCode, out.Routes
+}
+
+func TestServer_routeList_omitsUpstreamRoutes(t *testing.T) {
+	addr := startTestServer(t, credproxy.ServerConfig{
+		ListenTCP: "127.0.0.1:0",
+		Routes: []credproxy.Route{
+			{Path: "/ctx-sync", Provider: &fakeProvider{inj: &credproxy.Injection{BodyReplace: []byte(`{}`)}}},
+			// An upstream route must never be advertised: probing it would
+			// send a real request upstream with a real credential attached.
+			{Path: "/anthropic", Upstream: "http://localhost:1", Provider: &fakeProvider{inj: &credproxy.Injection{}}},
+		},
+	})
+	status, routes := getRouteList(t, addr, "")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d", status)
+	}
+	if len(routes) != 1 || routes[0] != "ctx-sync" {
+		t.Errorf("routes = %v, want [ctx-sync]", routes)
+	}
+}
+
+func TestServer_routeList_requiresAuth(t *testing.T) {
+	addr := startTestServer(t, credproxy.ServerConfig{
+		ListenTCP:  "127.0.0.1:0",
+		AuthTokens: []credproxy.TokenAuth{{Token: "secret", ID: "client-a"}},
+		Routes: []credproxy.Route{
+			{Path: "/ctx-sync", Provider: &fakeProvider{inj: &credproxy.Injection{BodyReplace: []byte(`{}`)}}},
+		},
+	})
+	if status, _ := getRouteList(t, addr, ""); status != http.StatusUnauthorized {
+		t.Errorf("unauthenticated status = %d, want 401", status)
+	}
+	if _, routes := getRouteList(t, addr, "secret"); len(routes) != 1 {
+		t.Errorf("routes = %v", routes)
+	}
+}
+
+// A restricted route must not be advertised to clients that would only get a
+// 403 from it: the listing states what this caller may fetch, not what exists.
+func TestServer_routeList_honorsAllowedClientIDs(t *testing.T) {
+	addr := startTestServer(t, credproxy.ServerConfig{
+		ListenTCP: "127.0.0.1:0",
+		AuthTokens: []credproxy.TokenAuth{
+			{Token: "tok-a", ID: "client-a"},
+			{Token: "tok-b", ID: "client-b"},
+		},
+		Routes: []credproxy.Route{
+			{Path: "/shared", Provider: &fakeProvider{inj: &credproxy.Injection{BodyReplace: []byte(`{}`)}}},
+			{
+				Path:             "/only-a",
+				Provider:         &fakeProvider{inj: &credproxy.Injection{BodyReplace: []byte(`{}`)}},
+				AllowedClientIDs: []string{"client-a"},
+			},
+		},
+	})
+	_, forA := getRouteList(t, addr, "tok-a")
+	if len(forA) != 2 {
+		t.Errorf("client-a routes = %v, want both", forA)
+	}
+	_, forB := getRouteList(t, addr, "tok-b")
+	if len(forB) != 1 || forB[0] != "shared" {
+		t.Errorf("client-b routes = %v, want [shared]", forB)
+	}
+}
+
+func TestServer_reservedRoutePathRejected(t *testing.T) {
+	for _, path := range []string{"/healthz", "/_routes"} {
+		_, err := credproxy.New(credproxy.ServerConfig{
+			ListenTCP:            "127.0.0.1:0",
+			AllowUnauthenticated: true,
+			Routes: []credproxy.Route{
+				{Path: path, Provider: &fakeProvider{inj: &credproxy.Injection{BodyReplace: []byte(`{}`)}}},
+			},
+		})
+		if err == nil {
+			t.Errorf("route %s: expected New to reject a reserved path", path)
+		}
 	}
 }
 
