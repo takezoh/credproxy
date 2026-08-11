@@ -17,3 +17,21 @@ func validate(c Config) error {
 	}
 	return nil
 }
+
+// ValidateClientIDs cross-checks allowed_client_ids against the token IDs
+// actually loaded (pure). Every referenced id must exist as a named token —
+// an allowlist entry that can never match is a policy typo, not a policy.
+func ValidateClientIDs(routes []Route, tokenIDs []string) error {
+	known := make(map[string]bool, len(tokenIDs))
+	for _, id := range tokenIDs {
+		known[id] = true
+	}
+	for i, r := range routes {
+		for _, id := range r.AllowedClientIDs {
+			if !known[id] {
+				return fmt.Errorf("config: route[%d] %s: allowed_client_ids %q does not match any token id", i, r.Path, id)
+			}
+		}
+	}
+	return nil
+}

@@ -78,8 +78,63 @@ func TestLoadTokens(t *testing.T) {
 	if len(tokens) != 3 {
 		t.Errorf("got %d tokens, want 3: %v", len(tokens), tokens)
 	}
-	if tokens[2] != "tok3" {
-		t.Errorf("token[2] = %q, want trimmed", tokens[2])
+	if tokens[2].Value != "tok3" || tokens[2].ID != "" {
+		t.Errorf("token[2] = %+v, want trimmed bare token", tokens[2])
+	}
+}
+
+func TestLoadTokens_namedEntries(t *testing.T) {
+	dir := t.TempDir()
+	tokenFile := filepath.Join(dir, "tokens")
+	body := "client-a=tok1\nbare-token\n client-b = tok2 \n"
+	if err := os.WriteFile(tokenFile, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tokens, err := config.LoadTokens(tokenFile)
+	if err != nil {
+		t.Fatalf("LoadTokens: %v", err)
+	}
+	want := []config.Token{
+		{ID: "client-a", Value: "tok1"},
+		{Value: "bare-token"},
+		{ID: "client-b", Value: "tok2"},
+	}
+	if len(tokens) != len(want) {
+		t.Fatalf("got %d tokens, want %d: %v", len(tokens), len(want), tokens)
+	}
+	for i := range want {
+		if tokens[i] != want[i] {
+			t.Errorf("token[%d] = %+v, want %+v", i, tokens[i], want[i])
+		}
+	}
+}
+
+func TestLoadTokens_rejectsMalformedNamed(t *testing.T) {
+	dir := t.TempDir()
+	for _, body := range []string{"=tok\n", "client-a=\n", "client-a=t1\nclient-a=t2\n"} {
+		tokenFile := filepath.Join(dir, "tokens")
+		if err := os.WriteFile(tokenFile, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := config.LoadTokens(tokenFile); err == nil {
+			t.Errorf("expected error for %q", body)
+		}
+	}
+}
+
+func TestValidateClientIDs(t *testing.T) {
+	routes := []config.Route{{Path: "/a", AllowedClientIDs: []string{"client-a"}}}
+	if err := config.ValidateClientIDs(routes, []string{"client-a", "client-b"}); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if err := config.ValidateClientIDs(routes, []string{"client-b"}); err == nil {
+		t.Error("expected error for unknown client id")
+	}
+	if err := config.ValidateClientIDs(routes, nil); err == nil {
+		t.Error("expected error when no tokens are loaded")
+	}
+	if err := config.ValidateClientIDs([]config.Route{{Path: "/a"}}, nil); err != nil {
+		t.Errorf("routes without restrictions must pass: %v", err)
 	}
 }
 

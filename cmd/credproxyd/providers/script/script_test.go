@@ -2,6 +2,7 @@ package script_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -92,5 +93,37 @@ func TestScriptProvider_bodyReplace(t *testing.T) {
 	}
 	if len(inj.BodyReplace) == 0 {
 		t.Error("expected BodyReplace to be set")
+	}
+}
+
+func TestScriptProvider_failureReason_typed(t *testing.T) {
+	// A failing hook that prints "reason:<token>" on the first stderr line
+	// surfaces a credproxy.ReasonError so the proxy can pass it to clients.
+	cmd := writeScript(t, `echo "reason:op_rate_limited" >&2; echo "detail line" >&2; exit 1`)
+	p := script.New("test", cmd, nil, 5*time.Second)
+	_, err := p.Get(context.Background(), credproxy.Request{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var re *credproxy.ReasonError
+	if !errors.As(err, &re) {
+		t.Fatalf("expected ReasonError, got %T: %v", err, err)
+	}
+	if re.Reason != "op_rate_limited" {
+		t.Errorf("Reason = %q, want op_rate_limited", re.Reason)
+	}
+}
+
+func TestScriptProvider_failureWithoutReason_untyped(t *testing.T) {
+	// Free-form stderr must not be promoted into a client-visible reason.
+	cmd := writeScript(t, `echo "some stderr noise" >&2; exit 1`)
+	p := script.New("test", cmd, nil, 5*time.Second)
+	_, err := p.Get(context.Background(), credproxy.Request{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var re *credproxy.ReasonError
+	if errors.As(err, &re) {
+		t.Fatalf("unexpected ReasonError from free-form stderr: %v", err)
 	}
 }

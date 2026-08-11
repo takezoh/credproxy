@@ -3,12 +3,14 @@ package credproxy
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -79,19 +81,33 @@ func (h *routeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = r.Body.Close()
 	}
 
+	clientID, _ := r.Context().Value(tokenIDKey{}).(string)
+	if len(h.cfg.AllowedClientIDs) > 0 && !clientAllowed(h.cfg.AllowedClientIDs, clientID) {
+		h.log.Warn("client not allowed for route", "route", h.routeLog, "client", clientID)
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
 	proxyReq := Request{
 		Method: r.Method,
 		Path:   r.URL.Path,
 		Host:   r.Host,
 	}
-	if id, ok := r.Context().Value(tokenIDKey{}).(string); ok && id != "" {
-		proxyReq.Metadata = map[string]string{"token_id": id}
+	if clientID != "" {
+		proxyReq.Metadata = map[string]string{"token_id": clientID}
+	}
+	if pc, ok := r.Context().Value(peerCredKey{}).(peerCred); ok && pc.available {
+		if proxyReq.Metadata == nil {
+			proxyReq.Metadata = map[string]string{}
+		}
+		proxyReq.Metadata["peer_uid"] = strconv.FormatUint(uint64(pc.UID), 10)
+		proxyReq.Metadata["peer_pid"] = strconv.FormatInt(int64(pc.PID), 10)
 	}
 
 	injection, err := h.cfg.Provider.Get(r.Context(), proxyReq)
 	if err != nil {
 		h.log.Error("provider.Get failed", "route", h.routeLog, "err", err)
-		http.Error(w, "credential error", http.StatusBadGateway)
+		h.writeCredentialError(w, err, "credential error")
 		return
 	}
 
@@ -142,7 +158,7 @@ func (h *routeHandler) errorHandler(w http.ResponseWriter, r *http.Request, err 
 	refreshInj, err := h.cfg.Provider.Refresh(r.Context(), state.proxyReq)
 	if err != nil {
 		h.log.Error("provider.Refresh failed", "route", h.routeLog, "err", err)
-		http.Error(w, "credential refresh error", http.StatusBadGateway)
+		h.writeCredentialError(w, err, "credential refresh error")
 		return
 	}
 
@@ -159,6 +175,25 @@ func (h *routeHandler) errorHandler(w http.ResponseWriter, r *http.Request, err 
 	state.retried = true
 	req := applyPlan(r, state.body, planRequest(h.cfg, refreshInj))
 	h.proxy.ServeHTTP(w, req)
+}
+
+// writeCredentialError reports a Provider failure to the client. Only the
+// machine-readable reason of a ReasonError crosses the boundary as a structured
+// body; every other detail (hook stderr, wrapped errors) stays in server logs so
+// that a misbehaving hook cannot leak secrets through the client-facing response.
+func (h *routeHandler) writeCredentialError(w http.ResponseWriter, err error, fallback string) {
+	var re *ReasonError
+	if !errors.As(err, &re) {
+		http.Error(w, fallback, http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusBadGateway)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"error":  "credential_unavailable",
+		"route":  h.routeLog,
+		"reason": re.Reason,
+	})
 }
 
 // applyPlan returns a clone of r with the requestPlan mutations applied.

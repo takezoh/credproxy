@@ -33,6 +33,7 @@ type PeriodicJob struct {
 type Server struct {
 	cfg          ServerConfig
 	log          *slog.Logger
+	selfUID      uint32
 	tokensMu     sync.RWMutex
 	tokens       []tokenEntry
 	mux          *http.ServeMux
@@ -49,17 +50,35 @@ func New(cfg ServerConfig) (*Server, error) {
 		log = slog.Default()
 	}
 
-
 	entries := make([]tokenEntry, len(cfg.AuthTokens))
 	for i, t := range cfg.AuthTokens {
 		entries[i] = tokenEntry{token: []byte(t.Token), id: t.ID}
 	}
 
+	if cfg.RequireSamePeerUID {
+		if !peerCredSupported {
+			return nil, errPeerCredUnsupported
+		}
+		if cfg.ListenTCP != "" {
+			return nil, fmt.Errorf("credproxy: RequireSamePeerUID cannot be enforced on a TCP listener")
+		}
+	}
+
+	// A per-route client restriction is meaningless without bearer identities:
+	// with AllowUnauthenticated every request has an empty client id and the
+	// restriction would deny everything while looking like a working control.
+	for _, r := range cfg.Routes {
+		if len(r.AllowedClientIDs) > 0 && cfg.AllowUnauthenticated {
+			return nil, fmt.Errorf("credproxy: route %s: AllowedClientIDs requires bearer authentication (AllowUnauthenticated is set)", r.Path)
+		}
+	}
+
 	s := &Server{
-		cfg:    cfg,
-		log:    log,
-		tokens: entries,
-		mux:    http.NewServeMux(),
+		cfg:     cfg,
+		log:     log,
+		selfUID: uint32(os.Getuid()),
+		tokens:  entries,
+		mux:     http.NewServeMux(),
 	}
 
 	if err := s.registerRoutes(); err != nil {
@@ -111,7 +130,7 @@ func (s *Server) RegisterPeriodic(j PeriodicJob) {
 
 // Run starts serving on the already-opened listeners and blocks until ctx is cancelled.
 func (s *Server) Run(ctx context.Context) error {
-	srv := &http.Server{Handler: s.mux}
+	srv := &http.Server{Handler: s.mux, ConnContext: connContext}
 
 	go s.runScheduler(ctx)
 

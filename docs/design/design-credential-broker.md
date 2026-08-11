@@ -27,6 +27,20 @@ invariants:
   statement: A TCP listener without authentication requires explicit AllowUnauthenticated
     opt-in.
   enforcement: contract
+- id: INV-004
+  statement: A route restricted by AllowedClientIDs serves only the named authenticated
+    clients; the restriction is rejected under AllowUnauthenticated (no identity to
+    check).
+  enforcement: test
+- id: INV-005
+  statement: RequireSamePeerUID admits only same-UID peers over a Unix socket, denies
+    when peer credentials are unavailable, and is refused on a TCP listener or an
+    unsupported platform (fail-closed).
+  enforcement: test
+- id: INV-006
+  statement: Only a hook's typed reason token reaches the client 502 body; hook stderr
+    detail never crosses the client boundary.
+  enforcement: test
 boundaries:
   provides:
   - authenticated HTTP proxy routes and synthetic credential endpoints
@@ -81,13 +95,16 @@ The core authenticates a client, matches a route, asks a Provider for an Injecti
 
 ## Boundaries
 
-The `credproxy` package owns HTTP behavior only. `container/` describes per-launch mounts and environment, `providers/` implements reusable backends, `secretenv/` resolves opaque references, and command packages own user-facing processes.
+The `credproxy` package owns HTTP behavior only. `container/` describes per-launch mounts and environment, `providers/` implements reusable backends, `secretenv/` resolves opaque references, and command packages own user-facing processes. `credproxy exec` fetches a daemon-defined route's env map over the Unix socket and injects it into a child process — the caller chooses only the route name, never the refs behind it.
 
 ## Invariants
 
 - Credential caching belongs to Providers or hook wrappers.
 - The core never learns Anthropic, AWS, gcloud, SSH, or caller-specific concepts.
 - Long-lived refresh tokens and private keys remain on the host side of the boundary.
+- A route may be restricted to named clients (`AllowedClientIDs`); token id is attribution, the restriction is what makes it authorization.
+- A Unix-socket server may require same-UID peers (`RequireSamePeerUID`) as defense-in-depth over the 0600 socket, failing closed where peer credentials cannot be read.
+- Hook failures may carry a machine-readable `reason` to the client; only the reason token crosses the boundary, so a hook cannot leak a secret through the error path.
 
 ## Collaboration
 

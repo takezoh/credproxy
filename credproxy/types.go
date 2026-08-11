@@ -21,9 +21,9 @@ type Provider interface {
 
 // Request describes the inbound HTTP request being proxied.
 type Request struct {
-	Method   string
-	Path     string
-	Host     string
+	Method string
+	Path   string
+	Host   string
 	// Metadata carries caller-supplied key/value pairs forwarded to Providers.
 	// The library never interprets these values (provider-agnostic).
 	Metadata map[string]string
@@ -67,6 +67,11 @@ type Route struct {
 	RefreshOnStatus []int
 	// StripInboundAuth removes the inbound Authorization header before injection.
 	StripInboundAuth bool
+	// AllowedClientIDs, when non-empty, restricts this route to the listed
+	// authenticated token IDs (TokenAuth.ID). Requests from other clients get
+	// 403. Empty means every authenticated client may use the route.
+	// Authorization, not attribution: token IDs alone only identify callers.
+	AllowedClientIDs []string
 }
 
 // TokenAuth pairs a bearer token with a caller-assigned identifier.
@@ -94,6 +99,13 @@ type ServerConfig struct {
 	// AllowUnauthenticated disables bearer authentication entirely when true.
 	// Should only be set for Unix-socket-only servers protected by OS file permissions.
 	AllowUnauthenticated bool
+	// RequireSamePeerUID rejects any connection whose peer process does not run
+	// as the same UID as the server. It applies to Unix-socket connections;
+	// New() returns an error if a TCP listener is configured (peer UID cannot be
+	// enforced over TCP) or if the platform cannot read peer credentials.
+	// This is defense-in-depth over the socket's 0600 mode, plus peer PID for
+	// audit attribution — not the primary authorization control.
+	RequireSamePeerUID bool
 	// Routes defines the proxy routes.
 	Routes []Route
 	// ShutdownTimeout is the maximum time to wait for in-flight requests when the context is

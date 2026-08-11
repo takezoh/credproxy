@@ -133,6 +133,25 @@ credential_command = ["bash", "-c", "exec ${HOME}/.config/credproxyd/hooks/aws-s
 hook_timeout_sec   = 10
 ```
 
+#### Per-route client restriction
+
+The tokens file may name each client as `<id>=<token>` (one per line; bare
+lines stay unnamed and get positional ids `token-0`, `token-1`, …). A route can
+then be restricted to specific clients with `allowed_client_ids`; other
+authenticated clients get 403. Every referenced id must exist as a named token
+or the daemon refuses to start.
+
+```toml
+[[route]]
+path               = "/anthropic"
+upstream           = "https://api.anthropic.com"
+credential_command = ["bash", "-c", "exec ${HOME}/.config/credproxyd/hooks/anthropic-get.sh"]
+allowed_client_ids = ["ci-runner"]
+```
+
+Token id is attribution; `allowed_client_ids` is what turns it into
+authorization.
+
 Start:
 
 ```sh
@@ -179,6 +198,24 @@ Hooks receive a JSON object on stdin and must write a JSON object to stdout:
 - `expires_in_sec > 30` → ScriptProvider caches the response; the hook is not re-executed until TTL expires
 - `body_replace` → returned as-is to the client, upstream not contacted
 - Non-zero exit → 502 to client
+
+#### Typed failure reasons
+
+A failing hook may classify the failure so the client can distinguish failure
+classes (rate limit vs invalid credential vs unreachable) without parsing logs.
+Print `reason:<token>` as the **first line of stderr** before exiting non-zero;
+the token must match `[a-z0-9_]{1,64}`:
+
+```sh
+echo "reason:op_rate_limited" >&2
+exit 1
+```
+
+The proxy then returns a structured 502 body — `{"error":"credential_unavailable","route":"<route>","reason":"op_rate_limited"}` —
+instead of the opaque default. Only the reason token crosses to the client; the
+rest of stderr stays in server logs, so a hook cannot leak a secret through this
+channel even if it accidentally prints one. stderr without a valid `reason:` line
+keeps the opaque 502.
 
 ### Reference Hooks
 
@@ -230,6 +267,31 @@ credproxy resolve --env-file .secrets.env
 Uses the same `~/.config/credproxy/config.toml` hook configuration as `run`.
 
 **Security:** `resolve` outputs only the entries declared in the env-file. Host environment variables are never included in the output — only the resolved secret values cross the process boundary to the caller. This is the interface used by the roost container broker to resolve secrets on behalf of container-side processes.
+
+## credproxy exec — run a command with a broker route's env injected
+
+`credproxy exec` fetches an env map from a running `credproxyd` over a Unix
+socket and execs a command with those variables injected. Unlike `run`/`resolve`,
+the caller cannot name refs or env-files — the only degree of freedom is the
+route name, and the route → ref mapping lives on the daemon side.
+
+```sh
+credproxy exec --socket "$XDG_RUNTIME_DIR/credproxyd/broker.sock" \
+  --route ctx-sync --token-file ~/.config/credproxyd/token -- ctx sync
+```
+
+The daemon serves the route via a `body_replace` hook returning
+`{"env":{"NAME":"value", ...}}` (the same schema as `resolve`). The values are
+injected into the child environment only, then `credproxy exec` replaces itself
+via `syscall.Exec`. The route name is charset-restricted (`[a-z0-9_-]+`) so it
+cannot smuggle path segments into the broker URL; a broker error surfaces the
+typed `reason` (see Typed failure reasons) rather than a bare status.
+
+This is the client half of the fixed-wrapper pattern: a sandboxed agent gets to
+pick *which wrapper to call*, never *which secret to resolve*. The resolved
+secret still enters the child's environment, so `exec` narrows the attack
+surface (no arbitrary ref/env-file, no `resolve`-style stdout dump) but does not
+hide the value from the child process itself.
 
 ## secretenv — resolver library
 

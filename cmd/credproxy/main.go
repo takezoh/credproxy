@@ -23,13 +23,15 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: credproxy <command>\ncommands:\n  run      resolve env-file refs and exec a command\n  resolve  resolve env-file refs and print JSON env")
+		return fmt.Errorf("usage: credproxy <command>\ncommands:\n  run      resolve env-file refs and exec a command\n  resolve  resolve env-file refs and print JSON env\n  exec     fetch env for a broker route over a Unix socket and exec a command")
 	}
 	switch args[0] {
 	case "run":
 		return runCmd(args[1:])
 	case "resolve":
 		return resolveCmd(args[1:])
+	case "exec":
+		return execCmd(args[1:])
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}

@@ -13,6 +13,16 @@ import (
 
 const defaultSafety = 30 * time.Second
 
+// maxLoggedStderr bounds hook stderr embedded into server-side error strings.
+const maxLoggedStderr = 2048
+
+func truncateForLog(b []byte) string {
+	if len(b) <= maxLoggedStderr {
+		return string(b)
+	}
+	return string(b[:maxLoggedStderr]) + "...(truncated)"
+}
+
 // hookRequest is the JSON structure sent to hook subprocesses on stdin.
 type hookRequest struct {
 	Action  string      `json:"action"`
@@ -105,7 +115,11 @@ func (p *Provider) run(ctx context.Context, action string, req credproxy.Request
 	c.Stderr = &stderr
 
 	if err := c.Run(); err != nil {
-		return nil, time.Time{}, fmt.Errorf("script %v: %w (stderr: %s)", cmd, err, stderr.String())
+		detail := fmt.Errorf("script %v: %w (stderr: %s)", cmd, err, truncateForLog(stderr.Bytes()))
+		if reason, ok := parseReason(stderr.Bytes()); ok {
+			return nil, time.Time{}, &credproxy.ReasonError{Reason: reason, Err: detail}
+		}
+		return nil, time.Time{}, detail
 	}
 
 	inj, cacheUntil, err := parseHookResponse(stdout.Bytes(), time.Now(), p.safety)

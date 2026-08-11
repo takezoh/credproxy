@@ -1,6 +1,7 @@
 package script
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -131,4 +132,34 @@ func itoa(n int) string {
 		buf = append([]byte{'-'}, buf...)
 	}
 	return string(buf)
+}
+
+func TestParseReason(t *testing.T) {
+	long := "reason:" + strings.Repeat("a", 65)
+	cases := []struct {
+		name   string
+		stderr string
+		want   string
+		ok     bool
+	}{
+		{"valid", "reason:op_rate_limited\n", "op_rate_limited", true},
+		{"valid with detail lines", "reason:vault_denied\nsecret detail\n", "vault_denied", true},
+		{"valid with surrounding space", "  reason:op_unreachable  \n", "op_unreachable", true},
+		{"digits and underscore", "reason:err_429", "err_429", true},
+		{"no prefix", "op_rate_limited", "", false},
+		{"prefix on second line only", "noise\nreason:op_rate_limited\n", "", false},
+		{"empty token", "reason:", "", false},
+		{"uppercase rejected", "reason:Op_Rate", "", false},
+		{"space in token rejected", "reason:op rate", "", false},
+		{"too long rejected", long, "", false},
+		{"empty stderr", "", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := parseReason([]byte(tc.stderr))
+			if got != tc.want || ok != tc.ok {
+				t.Errorf("parseReason(%q) = (%q, %v), want (%q, %v)", tc.stderr, got, ok, tc.want, tc.ok)
+			}
+		})
+	}
 }

@@ -39,7 +39,7 @@ func run() error {
 	initLogger(cfg.LogLevel)
 	slog.Info("credproxyd starting", "config", *cfgPath)
 
-	var rawTokens []string
+	var rawTokens []config.Token
 	if cfg.AuthTokensFile != "" {
 		rawTokens, err = config.LoadTokens(cfg.AuthTokensFile)
 		if err != nil {
@@ -47,8 +47,17 @@ func run() error {
 		}
 	}
 	tokens := make([]credproxy.TokenAuth, len(rawTokens))
+	ids := make([]string, len(rawTokens))
 	for i, t := range rawTokens {
-		tokens[i] = credproxy.TokenAuth{Token: t, ID: fmt.Sprintf("token-%d", i)}
+		id := t.ID
+		if id == "" {
+			id = fmt.Sprintf("token-%d", i)
+		}
+		tokens[i] = credproxy.TokenAuth{Token: t.Value, ID: id}
+		ids[i] = id
+	}
+	if err := config.ValidateClientIDs(cfg.Routes, ids); err != nil {
+		return err
 	}
 
 	routes := buildRoutes(cfg.Routes)
@@ -90,6 +99,7 @@ func buildRoutes(cfgRoutes []config.Route) []credproxy.Route {
 			Provider:         provider,
 			RefreshOnStatus:  r.RefreshOnStatus,
 			StripInboundAuth: r.StripInboundAuth,
+			AllowedClientIDs: r.AllowedClientIDs,
 		})
 	}
 	return routes

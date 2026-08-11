@@ -28,6 +28,21 @@ func extractBearer(values []string) (string, bool) {
 	return token, true
 }
 
+// clientAllowed reports whether the authenticated client id may use a route
+// restricted to allowed. An empty id (unauthenticated request) always fails —
+// a restriction without an identity to check against must deny, not pass.
+func clientAllowed(allowed []string, id string) bool {
+	if id == "" {
+		return false
+	}
+	for _, a := range allowed {
+		if a == id {
+			return true
+		}
+	}
+	return false
+}
+
 // matchTokenEntries returns the id of the first entry whose token matches presented.
 // All comparisons use constant-time byte equality to reduce timing side-channels.
 func matchTokenEntries(entries []tokenEntry, presented []byte) (id string, ok bool) {
@@ -48,6 +63,13 @@ func (s *Server) matchToken(presented []byte) (id string, ok bool) {
 
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.cfg.RequireSamePeerUID {
+			pc, _ := r.Context().Value(peerCredKey{}).(peerCred)
+			if !authorizePeer(pc, true, s.selfUID) {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+		}
 		if s.cfg.AllowUnauthenticated || s.tokenCount() == 0 {
 			next.ServeHTTP(w, r)
 			return

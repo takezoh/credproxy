@@ -3,6 +3,7 @@ package credproxy_test
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -508,4 +509,172 @@ func TestServer_Addr_ephemeralPort(t *testing.T) {
 	if addr == "" || strings.HasSuffix(addr, ":0") {
 		t.Errorf("Addr() = %q, want resolved port", addr)
 	}
+}
+
+func TestRouteHandler_reasonError_structured502(t *testing.T) {
+	// A Provider failure carrying a ReasonError must surface the machine-readable
+	// reason in a structured 502 body — and nothing else from the wrapped detail.
+	addr := startRouteTestServer(t, credproxy.Route{
+		Path:     "/api",
+		Upstream: "http://127.0.0.1:1",
+		Provider: &fakeProvider{err: &credproxy.ReasonError{
+			Reason: "op_rate_limited",
+			Err:    fmt.Errorf("hook stderr detail with sensitive-blob"),
+		}},
+	})
+
+	resp, err := http.Get("http://" + addr + "/api/test")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+	var parsed map[string]string
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatalf("body is not JSON: %v (%q)", err, body)
+	}
+	if parsed["error"] != "credential_unavailable" || parsed["route"] != "api" || parsed["reason"] != "op_rate_limited" {
+		t.Errorf("body = %v", parsed)
+	}
+	if strings.Contains(string(body), "sensitive-blob") {
+		t.Errorf("wrapped error detail leaked to client body: %q", body)
+	}
+}
+
+func TestRouteHandler_plainError_noDetailLeak(t *testing.T) {
+	// A Provider failure without a ReasonError keeps the legacy opaque 502 —
+	// the error string (which may embed hook stderr) must stay server-side.
+	addr := startRouteTestServer(t, credproxy.Route{
+		Path:     "/api",
+		Upstream: "http://127.0.0.1:1",
+		Provider: &fakeProvider{err: fmt.Errorf("stderr blob sensitive-blob")},
+	})
+
+	resp, err := http.Get("http://" + addr + "/api/test")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502", resp.StatusCode)
+	}
+	if strings.Contains(string(body), "sensitive-blob") {
+		t.Errorf("error detail leaked to client body: %q", body)
+	}
+}
+
+func TestRouteHandler_refreshReasonError_structured502(t *testing.T) {
+	// Refresh failures pass the reason through the same structured body.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer upstream.Close()
+
+	addr := startRouteTestServer(t, credproxy.Route{
+		Path:            "/api",
+		Upstream:        upstream.URL,
+		RefreshOnStatus: []int{401},
+		Provider: &refreshReasonErrProvider{getInj: &credproxy.Injection{}, refreshErr: &credproxy.ReasonError{
+			Reason: "op_token_invalid",
+		}},
+	})
+
+	resp, err := http.Get("http://" + addr + "/api/test")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502", resp.StatusCode)
+	}
+	var parsed map[string]string
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatalf("body is not JSON: %v (%q)", err, body)
+	}
+	if parsed["reason"] != "op_token_invalid" {
+		t.Errorf("reason = %q, want op_token_invalid", parsed["reason"])
+	}
+}
+
+func TestRouteHandler_allowedClientIDs(t *testing.T) {
+	// A restricted route serves listed clients, 403s other authenticated
+	// clients, and never reaches the Provider for denied requests.
+	provider := &fakeProvider{inj: &credproxy.Injection{BodyReplace: []byte(`{"ok":true}`)}}
+	addr := startTestServer(t, credproxy.ServerConfig{
+		ListenTCP: "127.0.0.1:0",
+		AuthTokens: []credproxy.TokenAuth{
+			{Token: "tok-a", ID: "client-a"},
+			{Token: "tok-b", ID: "client-b"},
+		},
+		Routes: []credproxy.Route{{
+			Path:             "/api",
+			Provider:         provider,
+			AllowedClientIDs: []string{"client-a"},
+		}},
+	})
+
+	get := func(token string) int {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/api/", nil)
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("GET: %v", err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	if code := get("tok-a"); code != http.StatusOK {
+		t.Errorf("allowed client status = %d, want 200", code)
+	}
+	if code := get("tok-b"); code != http.StatusForbidden {
+		t.Errorf("other client status = %d, want 403", code)
+	}
+	if code := get(""); code != http.StatusUnauthorized {
+		t.Errorf("unauthenticated status = %d, want 401", code)
+	}
+}
+
+func TestServer_allowedClientIDs_requiresAuth(t *testing.T) {
+	// AllowedClientIDs on an unauthenticated server would deny everything
+	// while looking like a working control — New must refuse the config.
+	_, err := credproxy.New(credproxy.ServerConfig{
+		ListenTCP:            "127.0.0.1:0",
+		AllowUnauthenticated: true,
+		Routes: []credproxy.Route{{
+			Path:             "/api",
+			Provider:         &fakeProvider{inj: &credproxy.Injection{}},
+			AllowedClientIDs: []string{"client-a"},
+		}},
+	})
+	if err == nil {
+		t.Fatal("expected New to reject AllowedClientIDs with AllowUnauthenticated")
+	}
+}
+
+type refreshReasonErrProvider struct {
+	getInj     *credproxy.Injection
+	refreshErr error
+}
+
+func (p *refreshReasonErrProvider) Get(_ context.Context, _ credproxy.Request) (*credproxy.Injection, error) {
+	return p.getInj, nil
+}
+
+func (p *refreshReasonErrProvider) Refresh(_ context.Context, _ credproxy.Request) (*credproxy.Injection, error) {
+	return nil, p.refreshErr
 }
