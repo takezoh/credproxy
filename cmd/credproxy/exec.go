@@ -88,6 +88,21 @@ func validRouteName(s string) bool {
 	return true
 }
 
+// brokerDialer opens the transport for a broker request. credproxyd is reachable
+// over its Unix socket and nothing else: the socket's 0600 mode and the
+// SO_PEERCRED check behind it are the access control, so the client has no TCP
+// mode to offer and gains none from this indirection.
+//
+// It is a package-level variable purely so tests can substitute a loopback
+// transport. Some sandboxes deny AF_UNIX outright, and without this seam every
+// test of route discovery, merging, shell quoting and error handling would be
+// unrunnable there — not merely untested over a socket. Nothing outside tests
+// reassigns it.
+var brokerDialer = func(ctx context.Context, socketPath string) (net.Conn, error) {
+	var d net.Dialer
+	return d.DialContext(ctx, "unix", socketPath)
+}
+
 // brokerGet performs an authenticated GET against the broker's Unix socket and
 // returns the response on 200, or a typed error otherwise. path is appended to
 // the fixed host and must already be caller-validated.
@@ -96,8 +111,7 @@ func brokerGet(ctx context.Context, socketPath, path, token string, timeout time
 		Timeout: timeout,
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				var d net.Dialer
-				return d.DialContext(ctx, "unix", socketPath)
+				return brokerDialer(ctx, socketPath)
 			},
 		},
 	}

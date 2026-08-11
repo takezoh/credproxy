@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/takezoh/credproxy/credproxy"
+	"github.com/takezoh/credproxy/internal/testenv"
 )
 
 // fakeProvider returns a fixed Injection for every Get/Refresh call.
@@ -220,7 +221,11 @@ func TestServer_bearerAuth_accepts(t *testing.T) {
 	}
 }
 
+// TestServer_unixSocket_permission checks a property only a real socket has, so
+// it cannot be re-expressed over loopback: it skips where AF_UNIX is denied.
 func TestServer_unixSocket_permission(t *testing.T) {
+	testenv.RequireUnixSocket(t)
+
 	dir := t.TempDir()
 	sockPath := dir + "/test.sock"
 

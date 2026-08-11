@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,21 +13,36 @@ import (
 	"testing"
 
 	"github.com/takezoh/credproxy/credproxy"
+	"github.com/takezoh/credproxy/internal/testenv"
 )
 
-// startUnixBrokerRoutes runs a credproxy server with arbitrary routes on a Unix
-// socket in a temp dir and returns the socket path.
-func startUnixBrokerRoutes(t *testing.T, routes []credproxy.Route, tokens []credproxy.TokenAuth) string {
-	t.Helper()
-	sock := filepath.Join(t.TempDir(), "broker.sock")
-	cfg := credproxy.ServerConfig{
-		ListenUnix: sock,
-		AuthTokens: tokens,
-		Routes:     routes,
-	}
+// brokerConfig builds a server config with the given routes, unauthenticated
+// unless the test supplied tokens.
+func brokerConfig(routes []credproxy.Route, tokens []credproxy.TokenAuth) credproxy.ServerConfig {
+	cfg := credproxy.ServerConfig{AuthTokens: tokens, Routes: routes}
 	if len(tokens) == 0 {
 		cfg.AllowUnauthenticated = true
 	}
+	return cfg
+}
+
+// startBrokerRoutes runs a credproxy server with arbitrary routes and points the
+// client's transport seam at it, returning the socket path the client should be
+// invoked with.
+//
+// The server listens on TCP loopback and the returned path is a placeholder
+// file, because what these tests check — route discovery, merging, shell
+// quoting, error handling, output format — is client logic that a Unix socket
+// only carries. Running them over loopback keeps them meaningful in
+// environments that deny AF_UNIX; the socket transport itself is covered
+// separately by TestEnvCmd_overRealUnixSocket.
+//
+// The placeholder must exist on disk: "credproxy env" checks for the socket
+// before making a request and stays quiet when it is absent.
+func startBrokerRoutes(t *testing.T, routes []credproxy.Route, tokens []credproxy.TokenAuth) string {
+	t.Helper()
+	cfg := brokerConfig(routes, tokens)
+	cfg.ListenTCP = "127.0.0.1:0"
 	srv, err := credproxy.New(cfg)
 	if err != nil {
 		t.Fatalf("credproxy.New: %v", err)
@@ -34,7 +50,41 @@ func startUnixBrokerRoutes(t *testing.T, routes []credproxy.Route, tokens []cred
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go func() { _ = srv.Run(ctx) }()
+
+	sock := filepath.Join(t.TempDir(), "broker.sock")
+	if err := os.WriteFile(sock, nil, 0o600); err != nil {
+		t.Fatalf("placeholder socket: %v", err)
+	}
+
+	addr := srv.Addr()
+	prev := brokerDialer
+	t.Cleanup(func() { brokerDialer = prev })
+	brokerDialer = func(ctx context.Context, socketPath string) (net.Conn, error) {
+		// The client must still route by the path it was given; a seam that
+		// ignored it would hide a wiring mistake in every test below.
+		if socketPath != sock {
+			return nil, fmt.Errorf("dialed %q, want %q", socketPath, sock)
+		}
+		var d net.Dialer
+		return d.DialContext(ctx, "tcp", addr)
+	}
 	return sock
+}
+
+// startUnixBrokerRoutes runs a credproxy server on a real Unix socket in a temp
+// dir and returns its path. Callers must gate on testenv.RequireUnixSocket.
+func startUnixBrokerRoutes(t *testing.T, routes []credproxy.Route, tokens []credproxy.TokenAuth) string {
+	t.Helper()
+	cfg := brokerConfig(routes, tokens)
+	cfg.ListenUnix = filepath.Join(t.TempDir(), "broker.sock")
+	srv, err := credproxy.New(cfg)
+	if err != nil {
+		t.Fatalf("credproxy.New: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go func() { _ = srv.Run(ctx) }()
+	return cfg.ListenUnix
 }
 
 // runEnv executes "credproxy env" against sock and returns stdout/stderr.
@@ -47,7 +97,7 @@ func runEnv(t *testing.T, sock string, extra ...string) (stdout, stderr string, 
 }
 
 func TestEnvCmd_mergesDiscoveredRoutes(t *testing.T) {
-	sock := startUnixBrokerRoutes(t, []credproxy.Route{
+	sock := startBrokerRoutes(t, []credproxy.Route{
 		{Path: "/ctx-sync", Provider: &envProvider{body: `{"env":{"CTX_TOKEN":"a"}}`}},
 		{Path: "/grok-x-search", Provider: &envProvider{body: `{"env":{"XAI_API_KEY":"b"}}`}},
 	}, nil)
@@ -63,7 +113,7 @@ func TestEnvCmd_mergesDiscoveredRoutes(t *testing.T) {
 }
 
 func TestEnvCmd_skipsRouteWithoutEnv(t *testing.T) {
-	sock := startUnixBrokerRoutes(t, []credproxy.Route{
+	sock := startBrokerRoutes(t, []credproxy.Route{
 		{Path: "/aws-credentials", Provider: &envProvider{body: `{"AccessKeyId":"AKIA","SecretAccessKey":"s"}`}},
 		{Path: "/ctx-sync", Provider: &envProvider{body: `{"env":{"CTX_TOKEN":"a"}}`}},
 	}, nil)
@@ -92,7 +142,7 @@ func TestEnvCmd_shellQuotingSurvivesEval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	sock := startUnixBrokerRoutes(t, []credproxy.Route{
+	sock := startBrokerRoutes(t, []credproxy.Route{
 		{Path: "/ctx-sync", Provider: &envProvider{body: string(body)}},
 	}, nil)
 
@@ -122,7 +172,7 @@ func TestEnvCmd_brokerAbsentIsQuietSuccess(t *testing.T) {
 }
 
 func TestEnvCmd_typedErrorSkipsOnlyThatRoute(t *testing.T) {
-	sock := startUnixBrokerRoutes(t, []credproxy.Route{
+	sock := startBrokerRoutes(t, []credproxy.Route{
 		{Path: "/broken", Provider: &envProvider{err: &credproxy.ReasonError{
 			Reason: "op_rate_limited",
 			Err:    fmt.Errorf("detail sensitive-blob"),
@@ -146,7 +196,7 @@ func TestEnvCmd_typedErrorSkipsOnlyThatRoute(t *testing.T) {
 }
 
 func TestEnvCmd_explicitRoutesOnly(t *testing.T) {
-	sock := startUnixBrokerRoutes(t, []credproxy.Route{
+	sock := startBrokerRoutes(t, []credproxy.Route{
 		{Path: "/ctx-sync", Provider: &envProvider{body: `{"env":{"CTX_TOKEN":"a"}}`}},
 		{Path: "/grok-x-search", Provider: &envProvider{body: `{"env":{"XAI_API_KEY":"b"}}`}},
 	}, nil)
@@ -161,7 +211,7 @@ func TestEnvCmd_explicitRoutesOnly(t *testing.T) {
 }
 
 func TestEnvCmd_jsonFormat(t *testing.T) {
-	sock := startUnixBrokerRoutes(t, []credproxy.Route{
+	sock := startBrokerRoutes(t, []credproxy.Route{
 		{Path: "/ctx-sync", Provider: &envProvider{body: `{"env":{"CTX_TOKEN":"a"}}`}},
 	}, nil)
 
@@ -182,7 +232,7 @@ func TestEnvCmd_jsonFormat(t *testing.T) {
 
 func TestEnvCmd_bearerAuth(t *testing.T) {
 	tokens := []credproxy.TokenAuth{{Token: "tok-1", ID: "client-a"}}
-	sock := startUnixBrokerRoutes(t, []credproxy.Route{
+	sock := startBrokerRoutes(t, []credproxy.Route{
 		{Path: "/ctx-sync", Provider: &envProvider{body: `{"env":{"CTX_TOKEN":"a"}}`}},
 	}, tokens)
 
@@ -211,7 +261,7 @@ func TestEnvCmd_bearerAuth(t *testing.T) {
 }
 
 func TestEnvCmd_missingTokenFileIsQuietSuccess(t *testing.T) {
-	sock := startUnixBrokerRoutes(t, []credproxy.Route{
+	sock := startBrokerRoutes(t, []credproxy.Route{
 		{Path: "/ctx-sync", Provider: &envProvider{body: `{"env":{"CTX_TOKEN":"a"}}`}},
 	}, nil)
 
@@ -221,6 +271,26 @@ func TestEnvCmd_missingTokenFileIsQuietSuccess(t *testing.T) {
 	}
 	if stdout != "" {
 		t.Errorf("stdout = %q, want empty", stdout)
+	}
+}
+
+// TestEnvCmd_overRealUnixSocket is the one test that exercises the transport the
+// other "env" tests stub out: a real Unix socket, dialed by the production
+// dialer. Everything else about "credproxy env" is checked over loopback, so
+// this is the only place a sandbox that denies AF_UNIX costs coverage.
+func TestEnvCmd_overRealUnixSocket(t *testing.T) {
+	testenv.RequireUnixSocket(t)
+
+	sock := startUnixBrokerRoutes(t, []credproxy.Route{
+		{Path: "/ctx-sync", Provider: &envProvider{body: `{"env":{"CTX_TOKEN":"a"}}`}},
+	}, nil)
+
+	stdout, stderr, err := runEnv(t, sock)
+	if err != nil {
+		t.Fatalf("runEnvCmd: %v (stderr: %s)", err, stderr)
+	}
+	if stdout != "export CTX_TOKEN='a'\n" {
+		t.Errorf("stdout = %q", stdout)
 	}
 }
 

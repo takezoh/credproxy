@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/takezoh/credproxy/internal/testenv"
 )
 
 func TestAuthorizePeer(t *testing.T) {
@@ -53,6 +55,8 @@ func TestServer_requireSamePeerUID_capturesRealPeer(t *testing.T) {
 	if !peerCredSupported {
 		t.Skip("peer credentials unsupported on this platform")
 	}
+	testenv.RequireUnixSocket(t)
+
 	sock := filepath.Join(t.TempDir(), "broker.sock")
 	srv, err := New(ServerConfig{
 		ListenUnix:           sock,

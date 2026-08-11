@@ -27,15 +27,16 @@ func (p *envProvider) Refresh(ctx context.Context, req credproxy.Request) (*cred
 	return p.Get(ctx, req)
 }
 
-// startUnixBroker runs a credproxy server with a single "/ctx-sync" route on a
-// Unix socket in a temp dir.
-func startUnixBroker(t *testing.T, provider credproxy.Provider, tokens []credproxy.TokenAuth) string {
+// startBroker runs a credproxy server with a single "/ctx-sync" route and wires
+// the client transport seam to it (see startBrokerRoutes: loopback, so these
+// stay runnable where AF_UNIX is denied).
+func startBroker(t *testing.T, provider credproxy.Provider, tokens []credproxy.TokenAuth) string {
 	t.Helper()
-	return startUnixBrokerRoutes(t, []credproxy.Route{{Path: "/ctx-sync", Provider: provider}}, tokens)
+	return startBrokerRoutes(t, []credproxy.Route{{Path: "/ctx-sync", Provider: provider}}, tokens)
 }
 
 func TestFetchEnv_success(t *testing.T) {
-	sock := startUnixBroker(t, &envProvider{body: `{"env":{"CTX_DATABASE_URL":"postgres://u:p@h/db"}}`}, nil)
+	sock := startBroker(t, &envProvider{body: `{"env":{"CTX_DATABASE_URL":"postgres://u:p@h/db"}}`}, nil)
 	env, err := fetchEnv(context.Background(), sock, "ctx-sync", "", 5*time.Second)
 	if err != nil {
 		t.Fatalf("fetchEnv: %v", err)
@@ -46,7 +47,7 @@ func TestFetchEnv_success(t *testing.T) {
 }
 
 func TestFetchEnv_reasonPropagated(t *testing.T) {
-	sock := startUnixBroker(t, &envProvider{err: &credproxy.ReasonError{
+	sock := startBroker(t, &envProvider{err: &credproxy.ReasonError{
 		Reason: "op_rate_limited",
 		Err:    fmt.Errorf("detail sensitive-blob"),
 	}}, nil)
@@ -64,7 +65,7 @@ func TestFetchEnv_reasonPropagated(t *testing.T) {
 
 func TestFetchEnv_bearerAuth(t *testing.T) {
 	tokens := []credproxy.TokenAuth{{Token: "tok-1", ID: "client-a"}}
-	sock := startUnixBroker(t, &envProvider{body: `{"env":{"A":"1"}}`}, tokens)
+	sock := startBroker(t, &envProvider{body: `{"env":{"A":"1"}}`}, tokens)
 
 	if _, err := fetchEnv(context.Background(), sock, "ctx-sync", "", 5*time.Second); err == nil {
 		t.Error("expected auth error without token")
@@ -79,7 +80,7 @@ func TestFetchEnv_bearerAuth(t *testing.T) {
 }
 
 func TestFetchEnv_missingEnvKey(t *testing.T) {
-	sock := startUnixBroker(t, &envProvider{body: `{"other":true}`}, nil)
+	sock := startBroker(t, &envProvider{body: `{"other":true}`}, nil)
 	if _, err := fetchEnv(context.Background(), sock, "ctx-sync", "", 5*time.Second); err == nil {
 		t.Error("expected error for body without env key")
 	}
