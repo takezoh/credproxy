@@ -46,16 +46,21 @@ invariants:
     routes the server answers locally and the caller is allowed to use — and a configured
     route may not claim a server-reserved path.
   enforcement: test
+- id: INV-008
+  statement: Consumer command selection, executable admission, argv policy, and consumer
+    process execution never enter credproxy APIs, configuration, or daemon runtime.
+  enforcement: test
 boundaries:
   provides:
   - authenticated HTTP proxy routes and synthetic credential endpoints
   - Provider, Store, container provider, and secret resolver contracts
   consumes:
   - caller-owned credential Providers and hooks
-  - host networking, subprocesses, and credential stores
+  - host networking and credential stores
   forbidden:
   - provider-specific authentication flows in the credproxy package
   - mounting long-lived host credential stores into containers
+  - selecting, validating, or executing a credential consumer command
 variability:
   fixed:
   - provider-agnostic request planning and one-refresh retry
@@ -101,7 +106,17 @@ The core authenticates a client, matches a route, asks a Provider for an Injecti
 
 ## Boundaries
 
-The `credproxy` package owns HTTP behavior only. `container/` describes per-launch mounts and environment, `providers/` implements reusable backends, `secretenv/` resolves opaque references, and command packages own user-facing processes. `credproxy exec` fetches a daemon-defined route's env map over the Unix socket and injects it into a child process — the caller chooses only the route name, never the refs behind it. `credproxy env` removes even that choice: it discovers the caller's routes through the reserved `/_routes` endpoint and exports their env maps, so a credential is added by defining a route and the consumer side never changes.
+The `credproxy` package owns HTTP behavior only. `container/` describes per-launch
+mounts and environment, `providers/` implements reusable credential backends, and
+`secretenv/` resolves opaque references. Provider helpers may execute a fixed
+credential-acquisition program; this does not authorize credproxy to know or execute
+the command that will consume the resulting credential.
+
+`credproxy env`, `resolve`, and the generic caller-selected `exec` helper are
+delivery surfaces. They do not contain an executable allowlist, argv grammar,
+consumer identity, or operation semantics. A consumer that must not receive the
+credential uses a protocol injection route (for example an HTTP Authorization
+header); its own repository owns the operation behind that protocol.
 
 ## Invariants
 
@@ -113,6 +128,8 @@ The `credproxy` package owns HTTP behavior only. `container/` describes per-laun
 - Hook failures may carry a machine-readable `reason` to the client; only the reason token crosses the boundary, so a hook cannot leak a secret through the error path.
 - `/healthz` and `/_routes` are server-owned paths; a route that collides with one is a startup error, not a shadowed control.
 - Discovery never triggers an upstream request and never advertises a route the caller could not use, so listing routes costs nothing and reveals nothing beyond what the caller may already fetch.
+- No route or daemon configuration can name a consumer executable, subcommand, argv
+  grammar, consumer environment, or process result.
 
 ## Collaboration
 
@@ -128,7 +145,10 @@ Providers and routes are extensible. Authentication defaults, retry count, strea
 
 ## Conformance
 
-`go test ./...`, provider-specific tests, `go vet ./...`, and security-focused route/auth tests verify the design.
+`go test ./...` includes a repository architecture test that rejects consumer
+operation vocabulary and process execution in the proxy core and daemon wiring.
+Provider helper subprocesses and the generic caller-owned CLI helper are explicit
+exceptions because they do not define consumer admission policy.
 
 ## Related Decisions
 

@@ -74,37 +74,6 @@ type Route struct {
 	AllowedClientIDs []string
 }
 
-// Operation is a daemon-executed, credential-holding command binding. Unlike
-// Route, an Operation never serializes its Injection back to the caller.
-type Operation struct {
-	Name              string
-	BindingRevision   string
-	ExecutablePaths   []string
-	Subcommand        string
-	Arguments         []OperationArgument
-	Environment       map[string]string
-	FixedEnv          map[string]string
-	PassEnv           []string
-	Provider          Provider
-	CredentialTimeout time.Duration
-	MaxRuntime        time.Duration
-	Runner            OperationRunner
-}
-
-// OperationArgument declares one optional flag/value pair in a finite grammar.
-type OperationArgument struct {
-	Flag      string
-	ValueType string
-	Min       time.Duration
-	Max       time.Duration
-}
-
-// OperationRunner executes the already validated fixed command. Implementations
-// must not return child output; errors cross only the daemon's private boundary.
-type OperationRunner interface {
-	Run(ctx context.Context, executable string, args, env []string) error
-}
-
 // TokenAuth pairs a bearer token with a caller-assigned identifier.
 // The identifier is forwarded to providers via Request.Metadata["token_id"],
 // enabling per-token access control without exposing the raw token value.
@@ -139,10 +108,6 @@ type ServerConfig struct {
 	RequireSamePeerUID bool
 	// Routes defines the proxy routes.
 	Routes []Route
-	// Operations are non-discoverable closed command bindings.
-	Operations []Operation
-	// DaemonRevision participates in the credroute handshake and is not inferred.
-	DaemonRevision string
 	// ShutdownTimeout is the maximum time to wait for in-flight requests when the context is
 	// cancelled. Defaults to 15 seconds.
 	ShutdownTimeout time.Duration

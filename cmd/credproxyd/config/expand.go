@@ -38,15 +38,6 @@ func expand(c Config, e envFuncs) (Config, error) {
 			r.RefreshCommand[j] = e.getenv(arg)
 		}
 	}
-	for i := range c.Operations {
-		op := &c.Operations[i]
-		if op.HookTimeoutSec <= 0 {
-			op.HookTimeoutSec = 10
-		}
-		if op.MaxRuntimeSec <= 0 {
-			op.MaxRuntimeSec = 300
-		}
-	}
 	return c, nil
 }
 

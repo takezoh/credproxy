@@ -171,65 +171,6 @@ must have no side effects, and probing one would send a real request upstream
 with a real credential attached) and routes whose `allowed_client_ids` exclude
 the caller (the listing states what the caller may fetch, not what exists).
 
-#### Closed command operations
-
-An `[[operation]]` is different from an env-serving `[[route]]`: the daemon
-resolves the credential, starts one fixed absolute executable itself, and
-returns only a bounded outcome. The credential map and child output are never
-sent to the caller, and operations are omitted from `/_routes`. A route may not
-use the same name as an operation.
-
-```toml
-daemon_revision = "credproxyd/package-20260812"
-
-[[operation]]
-name = "ctx-sync"
-binding_revision = "ctx-sync/2"
-executable_paths = ["/home/user/.local/lib/credproxy/bin/ctx"]
-subcommand = "sync"
-credential_command = ["/home/user/.local/lib/credproxy/bin/op-resolve", "ctx-sync"]
-hook_timeout_sec = 10
-max_runtime_sec = 300
-pass_env = ["LANG", "LC_ALL", "TZ"]
-fixed_env = { PATH = "/usr/bin:/bin", CTX_CONFIG = "/home/user/.config/context-fabric/config.toml" }
-env = { CTX_DATABASE_URL = "CTX_DATABASE_URL" }
-
-[[operation.argument]]
-flag = "-timeout"
-type = "duration"
-min = "1s"
-max = "5m"
-
-[[operation.argument]]
-flag = "-min-interval"
-type = "duration"
-min = "0s"
-max = "24h"
-```
-
-The provider response must be exactly
-`{"env":{"CTX_DATABASE_URL":"<opaque>"}}`. Missing, duplicate, or extra
-keys reject the operation before the child starts. Executable paths must be
-absolute executable regular files and may not be symlinks. Inherited env is
-limited to locale/timezone names; loader and language-runtime overrides are
-rejected.
-
-The installed wrapper invokes the non-secret client operation with literal
-socket, daemon, and binding revisions:
-
-```sh
-credproxy operation \
-  --socket /run/user/1000/credproxyd/broker.sock \
-  --route ctx-sync \
-  --binding-revision ctx-sync/2 \
-  --daemon-revision credproxyd/package-20260812 \
-  -- -timeout 30s -min-interval 5m
-```
-
-`credproxy --credroute-version` prints the client protocol and supported ctx
-binding. Protocol, binding, and daemon revision must all match; disagreement is
-a typed failure and does not fall back to `credproxy env` or `credproxy exec`.
-
 Start:
 
 ```sh

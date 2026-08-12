@@ -61,10 +61,6 @@ func run() error {
 	}
 
 	routes := buildRoutes(cfg.Routes)
-	operations, err := buildOperations(cfg.Operations)
-	if err != nil {
-		return err
-	}
 
 	srv, err := credproxy.New(credproxy.ServerConfig{
 		ListenTCP:            cfg.ListenTCP,
@@ -72,8 +68,6 @@ func run() error {
 		AuthTokens:           tokens,
 		AllowUnauthenticated: cfg.ListenTCP == "" && len(tokens) == 0,
 		Routes:               routes,
-		Operations:           operations,
-		DaemonRevision:       cfg.DaemonRevision,
 	})
 	if err != nil {
 		return err
@@ -87,36 +81,6 @@ func run() error {
 	}
 	slog.Info("credproxyd stopped")
 	return nil
-}
-
-func buildOperations(cfgOperations []config.Operation) ([]credproxy.Operation, error) {
-	operations := make([]credproxy.Operation, 0, len(cfgOperations))
-	for _, op := range cfgOperations {
-		arguments := make([]credproxy.OperationArgument, 0, len(op.Arguments))
-		for _, arg := range op.Arguments {
-			min, err := time.ParseDuration(arg.Min)
-			if err != nil {
-				return nil, fmt.Errorf("operation %s argument %s min: %w", op.Name, arg.Flag, err)
-			}
-			max, err := time.ParseDuration(arg.Max)
-			if err != nil {
-				return nil, fmt.Errorf("operation %s argument %s max: %w", op.Name, arg.Flag, err)
-			}
-			arguments = append(arguments, credproxy.OperationArgument{
-				Flag: arg.Flag, ValueType: arg.Type, Min: min, Max: max,
-			})
-		}
-		provider := script.New(op.Name, op.CredentialCommand, nil, time.Duration(op.HookTimeoutSec)*time.Second)
-		operations = append(operations, credproxy.Operation{
-			Name: op.Name, BindingRevision: op.BindingRevision,
-			ExecutablePaths: op.ExecutablePaths, Subcommand: op.Subcommand,
-			Arguments: arguments, Environment: op.Environment, FixedEnv: op.FixedEnv,
-			PassEnv: op.PassEnv, Provider: provider,
-			CredentialTimeout: time.Duration(op.HookTimeoutSec) * time.Second,
-			MaxRuntime:        time.Duration(op.MaxRuntimeSec) * time.Second,
-		})
-	}
-	return operations, nil
 }
 
 func buildRoutes(cfgRoutes []config.Route) []credproxy.Route {
