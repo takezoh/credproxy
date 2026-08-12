@@ -81,6 +81,12 @@ func New(cfg ServerConfig) (*Server, error) {
 			return nil, fmt.Errorf("credproxy: route %s: AllowedClientIDs requires bearer authentication (AllowUnauthenticated is set)", r.Path)
 		}
 	}
+	if len(cfg.Operations) > 0 && cfg.DaemonRevision == "" {
+		return nil, fmt.Errorf("credproxy: DaemonRevision is required when operations are configured")
+	}
+	if len(cfg.Operations) > 0 && (cfg.ListenUnix == "" || cfg.ListenTCP != "") {
+		return nil, fmt.Errorf("credproxy: closed operations require an exclusive Unix listener")
+	}
 
 	s := &Server{
 		cfg:     cfg,
@@ -214,8 +220,29 @@ func (s *Server) registerRoutes() error {
 		_, _ = w.Write([]byte("ok"))
 	})
 	s.mux.Handle("/_routes", s.authMiddleware(http.HandlerFunc(s.handleRouteList)))
+	operationNames := make(map[string]bool, len(s.cfg.Operations))
+	for _, op := range s.cfg.Operations {
+		if operationNames[op.Name] {
+			return fmt.Errorf("credproxy: duplicate operation %s", op.Name)
+		}
+		operationNames[op.Name] = true
+		h, err := newOperationHandler(op, s.cfg.DaemonRevision, s.log)
+		if err != nil {
+			return fmt.Errorf("credproxy: operation %s: %w", op.Name, err)
+		}
+		// Operations are reachable only on the exclusive 0600 Unix listener.
+		// Any same-UID caller may cause the fixed command to run; unlike generic
+		// routes, the operation never returns credential material and therefore
+		// does not require a bearer credential to invoke.
+		s.mux.Handle(operationPathPrefix+op.Name, h)
+	}
 	for _, r := range s.cfg.Routes {
-		if reservedPaths[strings.TrimSuffix(r.Path, "/")] {
+		cleanPath := strings.TrimSuffix(r.Path, "/")
+		routeName := strings.TrimPrefix(cleanPath, "/")
+		if operationNames[routeName] {
+			return fmt.Errorf("credproxy: route %s conflicts with closed operation %s", r.Path, routeName)
+		}
+		if reservedPaths[cleanPath] || strings.HasPrefix(cleanPath+"/", operationPathPrefix) || strings.HasPrefix(operationPathPrefix, cleanPath+"/") {
 			return fmt.Errorf("credproxy: route %s: path is reserved by the server", r.Path)
 		}
 		h, err := newRouteHandler(r, s.log)

@@ -107,14 +107,7 @@ var brokerDialer = func(ctx context.Context, socketPath string) (net.Conn, error
 // returns the response on 200, or a typed error otherwise. path is appended to
 // the fixed host and must already be caller-validated.
 func brokerGet(ctx context.Context, socketPath, path, token string, timeout time.Duration) (*http.Response, error) {
-	client := &http.Client{
-		Timeout: timeout,
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				return brokerDialer(ctx, socketPath)
-			},
-		},
-	}
+	client := brokerHTTPClient(socketPath, timeout)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://credproxyd/"+path, nil)
 	if err != nil {
@@ -133,6 +126,17 @@ func brokerGet(ctx context.Context, socketPath, path, token string, timeout time
 		return nil, brokerError(resp)
 	}
 	return resp, nil
+}
+
+func brokerHTTPClient(socketPath string, timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				return brokerDialer(ctx, socketPath)
+			},
+		},
+	}
 }
 
 // fetchRouteEnv requests one route's body from credproxyd and returns its env

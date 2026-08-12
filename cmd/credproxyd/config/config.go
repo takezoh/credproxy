@@ -10,11 +10,13 @@ import (
 
 // Config is the root configuration for credproxyd.
 type Config struct {
-	ListenTCP      string  `toml:"listen_tcp"`
-	ListenUnix     string  `toml:"listen_unix"`
-	LogLevel       string  `toml:"log_level"`
-	AuthTokensFile string  `toml:"auth_tokens_file"`
-	Routes         []Route `toml:"route"`
+	ListenTCP      string      `toml:"listen_tcp"`
+	ListenUnix     string      `toml:"listen_unix"`
+	LogLevel       string      `toml:"log_level"`
+	DaemonRevision string      `toml:"daemon_revision"`
+	AuthTokensFile string      `toml:"auth_tokens_file"`
+	Routes         []Route     `toml:"route"`
+	Operations     []Operation `toml:"operation"`
 }
 
 // Route maps an incoming path prefix to an upstream and hook script commands.
@@ -27,6 +29,29 @@ type Route struct {
 	HookTimeoutSec    int      `toml:"hook_timeout_sec"`
 	StripInboundAuth  bool     `toml:"strip_inbound_auth"`
 	AllowedClientIDs  []string `toml:"allowed_client_ids"`
+}
+
+// Operation defines a closed daemon-side command. Credential values are
+// injected into the child and are never serialized to the caller.
+type Operation struct {
+	Name              string              `toml:"name"`
+	BindingRevision   string              `toml:"binding_revision"`
+	ExecutablePaths   []string            `toml:"executable_paths"`
+	Subcommand        string              `toml:"subcommand"`
+	CredentialCommand []string            `toml:"credential_command"`
+	HookTimeoutSec    int                 `toml:"hook_timeout_sec"`
+	MaxRuntimeSec     int                 `toml:"max_runtime_sec"`
+	Environment       map[string]string   `toml:"env"`
+	FixedEnv          map[string]string   `toml:"fixed_env"`
+	PassEnv           []string            `toml:"pass_env"`
+	Arguments         []OperationArgument `toml:"argument"`
+}
+
+type OperationArgument struct {
+	Flag string `toml:"flag"`
+	Type string `toml:"type"`
+	Min  string `toml:"min"`
+	Max  string `toml:"max"`
 }
 
 // Load reads, expands, and validates configuration from path.

@@ -23,9 +23,15 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: credproxy <command>\ncommands:\n  run      resolve env-file refs and exec a command\n  resolve  resolve env-file refs and print JSON env\n  exec     fetch env for a broker route over a Unix socket and exec a command\n  env      fetch env for every broker route and print shell exports")
+		return fmt.Errorf("usage: credproxy <command>\ncommands:\n  operation run a closed daemon-side operation without receiving credentials\n  run      resolve env-file refs and exec a command\n  resolve  resolve env-file refs and print JSON env\n  exec     fetch env for a broker route over a Unix socket and exec a command\n  env      fetch env for every broker route and print shell exports")
+	}
+	if args[0] == "--credroute-version" {
+		fmt.Fprintln(os.Stdout, credrouteVersion())
+		return nil
 	}
 	switch args[0] {
+	case "operation":
+		return operationCmd(args[1:])
 	case "run":
 		return runCmd(args[1:])
 	case "resolve":
