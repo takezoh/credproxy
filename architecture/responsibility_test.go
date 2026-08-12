@@ -87,3 +87,21 @@ func TestConsumerCommandsStayOutsideCredproxy(t *testing.T) {
 		}
 	}
 }
+
+func TestContributorInstructionsLinkResponsibilityBoundary(t *testing.T) {
+	raw, err := os.ReadFile("../AGENTS.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	for _, required := range []string{
+		"docs/design/design-credential-broker.md",
+		"docs/adr/adr-20260812-keep-consumer-command-policy-outside-cre.md",
+		"must not select, admit, validate, or execute a credential consumer operation",
+		"go test ./architecture",
+	} {
+		if !strings.Contains(text, required) {
+			t.Errorf("AGENTS.md does not expose responsibility principle %q", required)
+		}
+	}
+}
