@@ -233,6 +233,29 @@ func TestRouteHandler_pathStripping(t *testing.T) {
 	}
 }
 
+func TestRouteHandler_exactPathDoesNotGainTrailingSlash(t *testing.T) {
+	var gotPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+	}))
+	defer upstream.Close()
+
+	addr := startRouteTestServer(t, credproxy.Route{
+		Path:     "/sync",
+		Upstream: upstream.URL + "/v1/sync/remote",
+		Provider: &fakeProvider{inj: &credproxy.Injection{}},
+	})
+
+	resp, err := http.Post("http://"+addr+"/sync", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	_ = resp.Body.Close()
+	if gotPath != "/v1/sync/remote" {
+		t.Errorf("upstream path = %q, want /v1/sync/remote", gotPath)
+	}
+}
+
 func TestRouteHandler_SSEStreamingTransparent(t *testing.T) {
 	// Upstream sends a Server-Sent Events stream in two chunks with a Flush between them.
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

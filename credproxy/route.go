@@ -51,7 +51,14 @@ func newRouteHandler(cfg Route, log *slog.Logger) (*routeHandler, error) {
 		}
 		h.proxy = &httputil.ReverseProxy{
 			Rewrite: func(r *httputil.ProxyRequest) {
+				exactPath := r.Out.URL.Path == ""
 				r.SetURL(upstream)
+				if exactPath {
+					// SetURLはempty pathをslashとしてjoinする。exact routeでは
+					// configured upstream pathをそのまま保ち、末尾slashを足さない。
+					r.Out.URL.Path = upstream.Path
+					r.Out.URL.RawPath = upstream.RawPath
+				}
 				r.Out.Host = upstream.Host
 			},
 			ModifyResponse: h.modifyResponse,

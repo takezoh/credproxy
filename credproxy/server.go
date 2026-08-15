@@ -222,11 +222,13 @@ func (s *Server) registerRoutes() error {
 		if err != nil {
 			return fmt.Errorf("credproxy: route %s: %w", r.Path, err)
 		}
-		pattern := r.Path
-		if !strings.HasSuffix(pattern, "/") {
-			pattern += "/"
+		wrapped := s.authMiddleware(http.StripPrefix(r.Path, h))
+		s.mux.Handle(r.Path, wrapped)
+		if !strings.HasSuffix(r.Path, "/") {
+			// subtreeだけを登録するとServeMuxがexact pathをslash付きへredirectし、
+			// upstreamにも余分なslashが渡る。exact endpointとsubtreeを分けて登録する。
+			s.mux.Handle(r.Path+"/", wrapped)
 		}
-		s.mux.Handle(pattern, s.authMiddleware(http.StripPrefix(r.Path, h)))
 	}
 	return nil
 }
