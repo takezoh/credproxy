@@ -97,9 +97,13 @@ Each provider is constructed from a typed `Config` plus caller-supplied callback
 ### Quick Start
 
 ```sh
-make build
-sudo make install   # installs to /usr/local/bin/credproxyd
+bash install.sh   # builds and installs credproxyd + credproxy to ~/.local/bin
 ```
+
+`install.sh` builds both executables from this checkout and places them on the
+user PATH (`$HOME/.local/bin`, override with `BINDIR=/some/dir`). It only installs
+credproxy's own binaries; config, hooks, and the service are owned by the
+consuming environment. `make install` is a thin alias for `bash install.sh`.
 
 Configure:
 

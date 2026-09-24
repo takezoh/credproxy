@@ -1,14 +1,13 @@
 BINARY := credproxyd
 RUNNER := credproxy
-SOCKBRIDGE := sockbridge
-BIN_DIR := /usr/local/bin
+OUTPUT_DIR := bin
 
 .PHONY: build test vet lint install clean
 
 build:
-	go build -o $(BINARY) ./cmd/credproxyd
-	go build -o $(RUNNER) ./cmd/credproxy
-	go build -o $(SOCKBRIDGE) ./cmd/sockbridge
+	mkdir -p $(OUTPUT_DIR)
+	go build -o $(OUTPUT_DIR)/$(BINARY) ./cmd/credproxyd
+	go build -o $(OUTPUT_DIR)/$(RUNNER) ./cmd/credproxy
 
 test:
 	go test ./...
@@ -19,9 +18,8 @@ vet:
 lint:
 	golangci-lint run ./...
 
-install: build
-	install -m 0755 $(BINARY) $(BIN_DIR)/$(BINARY)
-	@echo "Installed $(BIN_DIR)/$(BINARY)"
+install:
+	bash ./install.sh
 
 clean:
-	rm -f $(BINARY) $(RUNNER) $(SOCKBRIDGE)
+	rm -rf $(OUTPUT_DIR)
