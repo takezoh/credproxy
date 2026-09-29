@@ -25,6 +25,10 @@ func expand(c Config, e envFuncs) (Config, error) {
 	if err != nil {
 		return c, fmt.Errorf("auth_tokens_file: %w", err)
 	}
+	c.OnePasswordTokenFile, err = expandPath(e.getenv(c.OnePasswordTokenFile), e.home)
+	if err != nil {
+		return c, fmt.Errorf("onepassword_token_file: %w", err)
+	}
 	for i := range c.Routes {
 		r := &c.Routes[i]
 		r.Upstream = e.getenv(r.Upstream)

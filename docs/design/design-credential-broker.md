@@ -80,6 +80,7 @@ failure_responsibilities:
 trust_boundaries:
 - untrusted container client to authenticated host proxy
 - provider output to upstream request mutation
+- local owner to private daemon refresh socket
 - opaque secret references to resolved process environment
 compatibility_policies:
 - Provider and Injection semantics remain stable across in-process and daemon modes.

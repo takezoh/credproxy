@@ -42,6 +42,63 @@ upstream = "https://example.com"
 	}
 }
 
+func TestLoad_onePasswordCredentialsAndRoutes(t *testing.T) {
+	path := writeConfig(t, `
+listen_unix = "/tmp/credproxyd-test.sock"
+onepassword_token_file = "~/.secrets/op/service-account.token"
+[[credential]]
+name = "jenkins"
+provider = "onepassword"
+secret_ref = "op://vault/item/field"
+preload = true
+[[credential]]
+name = "api"
+provider = "onepassword"
+secret_ref = "op://vault/api/key"
+ttl_sec = 300
+[[route]]
+path = "/jenkins"
+upstream = "https://example.com"
+credential = "jenkins"
+delivery = "header"
+header = "Authorization"
+prefix = "Bearer "
+[[route]]
+path = "/api-env"
+delivery = "env"
+env = { API_KEY = "api" }
+`)
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Credentials) != 2 || len(cfg.Routes) != 2 || cfg.Routes[1].Env["API_KEY"] != "api" {
+		t.Fatalf("unexpected config shape: credentials=%d routes=%d", len(cfg.Credentials), len(cfg.Routes))
+	}
+}
+
+func TestLoad_preloadedCredentialRejectsAutomaticRefresh(t *testing.T) {
+	path := writeConfig(t, `
+listen_unix = "/tmp/credproxyd-test.sock"
+onepassword_token_file = "/tmp/token"
+[[credential]]
+name = "pinned"
+provider = "onepassword"
+secret_ref = "op://vault/item/field"
+preload = true
+[[route]]
+path = "/api"
+upstream = "https://example.com"
+credential = "pinned"
+delivery = "header"
+header = "Authorization"
+refresh_on_status = [401]
+`)
+	if _, err := config.Load(path); err == nil || !strings.Contains(err.Error(), "preloaded credential cannot refresh") {
+		t.Fatalf("expected preload refresh error, got %v", err)
+	}
+}
+
 func TestLoad_noListeners(t *testing.T) {
 	path := writeConfig(t, `
 [[route]]

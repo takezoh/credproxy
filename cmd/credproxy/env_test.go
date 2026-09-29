@@ -171,6 +171,24 @@ func TestEnvCmd_brokerAbsentIsQuietSuccess(t *testing.T) {
 	}
 }
 
+func TestEnvCmd_strictFailsWithoutExportingPartialCredentials(t *testing.T) {
+	sock := startBrokerRoutes(t, []credproxy.Route{
+		{Path: "/good", Provider: &envProvider{body: `{"env":{"KEY":"value"}}`}},
+		{Path: "/bad", Provider: &envProvider{err: fmt.Errorf("backend unavailable")}},
+	}, nil)
+	stdout, _, err := runEnv(t, sock, "--strict", "--route", "good", "--route", "bad", "--format", "json")
+	if err == nil || !strings.Contains(err.Error(), "route bad") {
+		t.Fatalf("strict error = %v", err)
+	}
+	if stdout != "" {
+		t.Fatalf("partial credentials escaped: %q", stdout)
+	}
+	stdout, _, err = runEnv(t, filepath.Join(t.TempDir(), "missing.sock"), "--strict", "--route", "good")
+	if err == nil || stdout != "" {
+		t.Fatalf("missing broker returned stdout=%q err=%v", stdout, err)
+	}
+}
+
 func TestEnvCmd_typedErrorSkipsOnlyThatRoute(t *testing.T) {
 	sock := startBrokerRoutes(t, []credproxy.Route{
 		{Path: "/broken", Provider: &envProvider{err: &credproxy.ReasonError{

@@ -10,9 +10,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/takezoh/credproxy/cmd/credproxyd/admin"
 	"github.com/takezoh/credproxy/cmd/credproxyd/config"
 	"github.com/takezoh/credproxy/cmd/credproxyd/providers/script"
 	"github.com/takezoh/credproxy/credproxy"
+	"github.com/takezoh/credproxy/providers/onepassword"
 )
 
 func main() {
@@ -60,7 +62,25 @@ func run() error {
 		return err
 	}
 
-	routes := buildRoutes(cfg.Routes)
+	var store *onepassword.Provider
+	if len(cfg.Credentials) > 0 {
+		resolver, err := onepassword.NewSDK(context.Background(), cfg.OnePasswordTokenFile)
+		if err != nil {
+			return err
+		}
+		specs := make([]onepassword.Credential, 0, len(cfg.Credentials))
+		for _, item := range cfg.Credentials {
+			specs = append(specs, onepassword.Credential{Name: item.Name, Ref: item.SecretRef, Preload: item.Preload, TTL: time.Duration(item.TTLSec) * time.Second})
+		}
+		store, err = onepassword.New(resolver, specs)
+		if err != nil {
+			return err
+		}
+		if err = store.Preload(context.Background()); err != nil {
+			return err
+		}
+	}
+	routes := buildRoutes(cfg.Routes, store)
 
 	srv, err := credproxy.New(credproxy.ServerConfig{
 		ListenTCP:            cfg.ListenTCP,
@@ -75,24 +95,51 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	var adminDone <-chan error
+	adminFailure := make(chan error, 1)
+	if store != nil {
+		socket, err := admin.DefaultSocketPath()
+		if err != nil {
+			return err
+		}
+		adminDone, err = admin.Start(ctx, socket, adminRefresher{store})
+		if err != nil {
+			return fmt.Errorf("admin socket: %w", err)
+		}
+		go func() {
+			if err := <-adminDone; err != nil {
+				slog.Error("admin socket stopped", "error", err)
+				adminFailure <- err
+				stop()
+			}
+		}()
+	}
 
 	if err := srv.Run(ctx); err != nil {
 		return fmt.Errorf("server: %w", err)
+	}
+	select {
+	case err := <-adminFailure:
+		return fmt.Errorf("admin socket: %w", err)
+	default:
 	}
 	slog.Info("credproxyd stopped")
 	return nil
 }
 
-func buildRoutes(cfgRoutes []config.Route) []credproxy.Route {
+func buildRoutes(cfgRoutes []config.Route, store *onepassword.Provider) []credproxy.Route {
 	routes := make([]credproxy.Route, 0, len(cfgRoutes))
 	for _, r := range cfgRoutes {
 		timeout := time.Duration(r.HookTimeoutSec) * time.Second
-		provider := script.New(
+		var provider credproxy.Provider = script.New(
 			trimPrefix(r.Path),
 			r.CredentialCommand,
 			r.RefreshCommand,
 			timeout,
 		)
+		if r.Delivery != "" {
+			provider = &onePasswordRoute{store: store, credential: r.Credential, delivery: r.Delivery, header: r.Header, prefix: r.Prefix, env: r.Env}
+		}
 		routes = append(routes, credproxy.Route{
 			Path:             r.Path,
 			Upstream:         r.Upstream,

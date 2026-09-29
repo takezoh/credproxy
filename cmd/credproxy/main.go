@@ -23,7 +23,7 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: credproxy <command>\ncommands:\n  run      resolve env-file refs and exec a command\n  resolve  resolve env-file refs and print JSON env\n  exec     fetch env for a broker route over a Unix socket and exec a command\n  env      fetch env for every broker route and print shell exports")
+		return fmt.Errorf("usage: credproxy <command>\ncommands:\n  run      resolve env-file refs and exec a command\n  resolve  resolve env-file refs and print JSON env\n  exec     fetch env for a broker route over a Unix socket and exec a command\n  env      fetch env for every broker route and print shell exports\n  refresh refresh one or all preloaded credentials in the daemon")
 	}
 	switch args[0] {
 	case "run":
@@ -34,6 +34,8 @@ func run(args []string) error {
 		return execCmd(args[1:])
 	case "env":
 		return envCmd(args[1:])
+	case "refresh":
+		return refreshCmd(args[1:])
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}

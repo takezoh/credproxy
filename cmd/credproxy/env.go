@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"syscall"
@@ -51,6 +52,7 @@ func runEnvCmd(args []string, stdout, stderr io.Writer) error {
 	socket := fs.String("socket", "", "credproxyd Unix socket path (default: $XDG_RUNTIME_DIR/credproxyd/broker.sock)")
 	tokenFile := fs.String("token-file", "", "file containing the bearer token (optional)")
 	format := fs.String("format", "sh", "output format: sh or json")
+	strict := fs.Bool("strict", false, "fail if the broker or any selected env route is unavailable")
 	timeoutSec := fs.Int("timeout-sec", 10, "broker request timeout in seconds")
 	var routes routeList
 	fs.Var(&routes, "route", "broker route to fetch (repeatable; default: every env-serving route)")
@@ -74,9 +76,15 @@ func runEnvCmd(args []string, stdout, stderr io.Writer) error {
 
 	token, ok := loadBrokerToken(*tokenFile, stderr)
 	if !ok {
+		if *strict {
+			return fmt.Errorf("broker token unavailable")
+		}
 		return nil
 	}
 	if _, err := os.Stat(socketPath); err != nil {
+		if *strict {
+			return fmt.Errorf("broker socket %s: %w", socketPath, err)
+		}
 		fmt.Fprintf(stderr, "credproxy env: broker socket unavailable (%s); no variables exported\n", socketPath)
 		return nil
 	}
@@ -88,14 +96,41 @@ func runEnvCmd(args []string, stdout, stderr io.Writer) error {
 	if len(routes) == 0 {
 		discovered, err := fetchRouteNames(ctx, socketPath, token, timeout, stderr)
 		if err != nil {
+			if *strict {
+				return fmt.Errorf("route discovery: %w", err)
+			}
 			fmt.Fprintf(stderr, "credproxy env: route discovery failed: %v\n", err)
 			return nil
 		}
 		routes = discovered
 	}
 
+	if *strict {
+		env, err := collectRouteEnvStrict(ctx, socketPath, token, timeout, routes)
+		if err != nil {
+			return err
+		}
+		return writeEnv(stdout, stderr, *format, env)
+	}
 	env := collectRouteEnv(ctx, socketPath, token, timeout, routes, stderr)
 	return writeEnv(stdout, stderr, *format, env)
+}
+
+func collectRouteEnvStrict(ctx context.Context, socketPath, token string, timeout time.Duration, routes []string) (map[string]string, error) {
+	merged := make(map[string]string)
+	for _, route := range routes {
+		values, err := fetchRouteEnv(ctx, socketPath, route, token, timeout)
+		if err != nil {
+			return nil, fmt.Errorf("route %s: %w", route, err)
+		}
+		if values == nil {
+			return nil, fmt.Errorf("route %s does not serve env", route)
+		}
+		for name, value := range values {
+			merged[name] = value
+		}
+	}
+	return merged, nil
 }
 
 // defaultBrokerSocket resolves the per-user broker socket the same way the
@@ -103,6 +138,10 @@ func runEnvCmd(args []string, stdout, stderr io.Writer) error {
 func defaultBrokerSocket() string {
 	dir := os.Getenv("XDG_RUNTIME_DIR")
 	if dir == "" {
+		if runtime.GOOS == "darwin" {
+			home, _ := os.UserHomeDir()
+			return filepath.Join(home, "Library", "Caches", "credproxyd", "runtime", "credproxyd", "broker.sock")
+		}
 		dir = fmt.Sprintf("/run/user/%d", os.Getuid())
 	}
 	return filepath.Join(dir, "credproxyd", "broker.sock")

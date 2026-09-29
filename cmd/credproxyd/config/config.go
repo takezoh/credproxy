@@ -10,23 +10,38 @@ import (
 
 // Config is the root configuration for credproxyd.
 type Config struct {
-	ListenTCP      string  `toml:"listen_tcp"`
-	ListenUnix     string  `toml:"listen_unix"`
-	LogLevel       string  `toml:"log_level"`
-	AuthTokensFile string  `toml:"auth_tokens_file"`
-	Routes         []Route `toml:"route"`
+	ListenTCP            string       `toml:"listen_tcp"`
+	ListenUnix           string       `toml:"listen_unix"`
+	LogLevel             string       `toml:"log_level"`
+	AuthTokensFile       string       `toml:"auth_tokens_file"`
+	OnePasswordTokenFile string       `toml:"onepassword_token_file"`
+	Credentials          []Credential `toml:"credential"`
+	Routes               []Route      `toml:"route"`
+}
+
+type Credential struct {
+	Name      string `toml:"name"`
+	Provider  string `toml:"provider"`
+	SecretRef string `toml:"secret_ref"`
+	Preload   bool   `toml:"preload"`
+	TTLSec    int    `toml:"ttl_sec"`
 }
 
 // Route maps an incoming path prefix to an upstream and hook script commands.
 type Route struct {
-	Path              string   `toml:"path"`
-	Upstream          string   `toml:"upstream"`
-	CredentialCommand []string `toml:"credential_command"`
-	RefreshCommand    []string `toml:"refresh_command"`
-	RefreshOnStatus   []int    `toml:"refresh_on_status"`
-	HookTimeoutSec    int      `toml:"hook_timeout_sec"`
-	StripInboundAuth  bool     `toml:"strip_inbound_auth"`
-	AllowedClientIDs  []string `toml:"allowed_client_ids"`
+	Path              string            `toml:"path"`
+	Upstream          string            `toml:"upstream"`
+	CredentialCommand []string          `toml:"credential_command"`
+	RefreshCommand    []string          `toml:"refresh_command"`
+	RefreshOnStatus   []int             `toml:"refresh_on_status"`
+	HookTimeoutSec    int               `toml:"hook_timeout_sec"`
+	StripInboundAuth  bool              `toml:"strip_inbound_auth"`
+	AllowedClientIDs  []string          `toml:"allowed_client_ids"`
+	Credential        string            `toml:"credential"`
+	Delivery          string            `toml:"delivery"`
+	Header            string            `toml:"header"`
+	Prefix            string            `toml:"prefix"`
+	Env               map[string]string `toml:"env"`
 }
 
 // Load reads, expands, and validates configuration from path.

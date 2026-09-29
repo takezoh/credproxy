@@ -1,0 +1,23 @@
+[Unit]
+Description=credproxy credential broker (per-user)
+Documentation=https://github.com/takezoh/credproxy
+After=default.target
+ConditionPathExists=%h/.secrets/op/service-account.token
+StartLimitIntervalSec=1h
+StartLimitBurst=3
+
+[Service]
+Type=simple
+RuntimeDirectory=credproxyd
+RuntimeDirectoryMode=0700
+ExecStart=%h/.local/bin/credproxyd --config %h/.config/credproxyd/config.toml
+Restart=on-failure
+RestartSec=5min
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%t/credproxyd
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

@@ -11,6 +11,9 @@ responsibilities:
 - id: RESP-002
   statement: Validate configuration, constrain hook execution, cache eligible results,
     and manage listeners and shutdown.
+- id: RESP-003
+  statement: Preload configured 1Password credentials, cache others by TTL, and refresh
+    selected values through a private owner-only control socket.
 invariants:
 - id: INV-001
   statement: Hook stdin and stdout use one JSON object per invocation and non-zero
@@ -54,8 +57,11 @@ source_paths:
 - cmd/credproxyd/main.go
 - cmd/credproxyd/config
 - cmd/credproxyd/providers/script
-summary: Shared local daemon and bounded JSON hook execution over the common Provider
-  contract.
+- cmd/credproxyd/admin
+- providers/onepassword
+- assets/systemd/user/credproxyd.service
+summary: Shared local daemon with bounded JSON hooks and a 1Password adapter over
+  the common Provider contract.
 ---
 
 ## Purpose
@@ -65,6 +71,15 @@ Provide credential routes as a reusable host service and permit backend changes 
 ## Responsibilities
 
 `credproxyd` owns configuration, signals, listeners, and ScriptProvider construction. ScriptProvider owns command execution, timeout, TTL cache, and singleflight deduplication.
+
+The daemon's 1Password adapter reads a protected service-account token at startup,
+preloads configured credential references before opening listeners, and shares their
+values across routes in process memory. Preloaded values remain fixed until an
+explicit `credproxy refresh` request succeeds. Other configured references use a
+positive TTL and deduplicate concurrent misses. A private owner-only Unix admin
+socket accepts refresh requests without returning credential values. Batch refresh
+replaces cached values only after every selected resolution succeeds. The daemon
+logs the underlying adapter error on failure.
 
 ## Boundaries
 
