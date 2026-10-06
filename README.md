@@ -193,6 +193,13 @@ curl -s http://localhost:9787/healthz           # → ok
 curl -H "Authorization: Bearer ${TOKEN}" http://localhost:9787/anthropic/v1/models
 ```
 
+### Credential cache lifetime
+
+Credential cache lifetime is managed by credproxyd. Each `[[credential]]` can omit
+`ttl_sec`; omitted or zero values use the daemon default of 3600 seconds (one hour).
+A positive `ttl_sec` overrides that default; negative values are invalid for
+non-preloaded credentials. `preload = true` retains its existing preload behavior.
+
 ### Hook Protocol
 
 Hooks receive a JSON object on stdin and must write a JSON object to stdout:

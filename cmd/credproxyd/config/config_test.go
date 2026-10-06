@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -210,5 +211,46 @@ upstream = "https://example.com"
 	}
 	if !strings.HasSuffix(cfg.ListenTCP, "9999") {
 		t.Errorf("env not expanded: %q", cfg.ListenTCP)
+	}
+}
+
+func TestLoad_credentialTTL(t *testing.T) {
+	for _, tc := range []struct {
+		name, setting string
+		want          int
+		invalid       bool
+	}{
+		{"omitted", "", 3600, false},
+		{"zero", "ttl_sec = 0", 3600, false},
+		{"override", "ttl_sec = 120", 120, false},
+		{"negative", "ttl_sec = -1", 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeConfig(t, fmt.Sprintf(`listen_unix = "/tmp/test.sock"
+onepassword_token_file = "/tmp/token"
+[[credential]]
+name = "first"
+provider = "onepassword"
+secret_ref = "op://vault/first/key"
+%s
+[[credential]]
+name = "second"
+provider = "onepassword"
+secret_ref = "op://vault/second/key"
+`, tc.setting))
+			cfg, err := config.Load(path)
+			if tc.invalid {
+				if err == nil {
+					t.Fatal("expected invalid TTL error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Credentials[0].TTLSec != tc.want || cfg.Credentials[1].TTLSec != 3600 {
+				t.Fatalf("unexpected TTLs: %d, %d", cfg.Credentials[0].TTLSec, cfg.Credentials[1].TTLSec)
+			}
+		})
 	}
 }

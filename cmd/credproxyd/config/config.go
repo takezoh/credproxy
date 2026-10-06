@@ -8,6 +8,9 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+// defaultCredentialTTLSec is the daemon-owned cache lifetime for credentials.
+const defaultCredentialTTLSec = 60 * 60
+
 // Config is the root configuration for credproxyd.
 type Config struct {
 	ListenTCP            string       `toml:"listen_tcp"`
@@ -49,6 +52,11 @@ func Load(path string) (*Config, error) {
 	cfg := &Config{LogLevel: "info"}
 	if _, err := toml.DecodeFile(path, cfg); err != nil {
 		return nil, fmt.Errorf("config: decode %s: %w", path, err)
+	}
+	for i := range cfg.Credentials {
+		if cfg.Credentials[i].TTLSec == 0 {
+			cfg.Credentials[i].TTLSec = defaultCredentialTTLSec
+		}
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
