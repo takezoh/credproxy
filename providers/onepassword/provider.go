@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -230,7 +231,22 @@ func NewSDK(ctx context.Context, tokenPath string) (Resolver, error) {
 	if err != nil {
 		return nil, fmt.Errorf("initialize 1Password SDK: %w", err)
 	}
-	return client.Secrets(), nil
+	return newSDKResolver(client), nil
+}
+
+// sdkResolver retains the parent SDK client: SecretsAPI alone does not keep
+// the client's finalizer from releasing the underlying native client ID.
+type sdkResolver struct {
+	client *sdk.Client
+}
+
+func newSDKResolver(client *sdk.Client) Resolver {
+	return &sdkResolver{client: client}
+}
+
+func (r *sdkResolver) Resolve(ctx context.Context, ref string) (string, error) {
+	defer runtime.KeepAlive(r.client)
+	return r.client.Secrets().Resolve(ctx, ref)
 }
 
 func readProtectedToken(path string) (string, error) {
