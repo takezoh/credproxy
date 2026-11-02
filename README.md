@@ -105,6 +105,10 @@ user PATH (`$HOME/.local/bin`, override with `BINDIR=/some/dir`). It only instal
 credproxy's own binaries; config, hooks, and the service are owned by the
 consuming environment. `make install` is a thin alias for `bash install.sh`.
 
+On Windows, run `.\install.ps1` from PowerShell. It builds `credproxyd.exe` and
+`credproxy.exe` into `$env:USERPROFILE\.local\bin` (override with `$env:BINDIR`);
+config, hooks, and services remain owned by the consuming environment.
+
 Configure:
 
 ```sh
