@@ -137,6 +137,34 @@ credential_command = ["bash", "-c", "exec ${HOME}/.config/credproxyd/hooks/aws-s
 hook_timeout_sec   = 10
 ```
 
+#### Native Windows transport
+
+Windows uses a local named pipe. When `listen_tcp`, `listen_unix`, and
+`listen_pipe` are all unset, the daemon selects
+`\\.\pipe\credproxyd-broker-<current SID>`. Set `listen_pipe` to choose a
+different endpoint. The pipe DACL grants its owner SID and SYSTEM; the listener
+rejects remote clients, refuses an occupied first instance, and admits a client
+only after reading its impersonated token SID. `require_peer_sid` optionally
+specifies the permitted client SID and is valid only with a pipe-only listener.
+`RequireSamePeerUID` remains a Unix-socket policy.
+
+The admin refresh endpoint uses a separate SID-scoped pipe. `credproxy env`,
+`exec`, and `refresh` use the matching per-user defaults. Before sending an HTTP
+request, Windows clients verify that the pipe server token SID matches the
+current user, then compare the running image file identity with the protected
+managed `credproxyd.exe` path. The image owner may be the current user, SYSTEM,
+Administrators, or TrustedInstaller; other DACL principals may have only read
+and execute access. This file-integrity policy is separate from the current-user
+server identity check, so machine-managed installations remain usable.
+`--server-executable` overrides the adjacent-binary default. A mismatched or
+unverifiable server receives no request bytes.
+
+For Windows 1Password service-account tokens, the token file and its parent and
+grandparent directories must be owned by the current SID and have an effective
+DACL granting access only to that SID and SYSTEM. Reparse components are
+rejected, and the token is read from the validated, held file handle. Unix
+continues to require its existing 0700 directories and 0600 token file.
+
 #### Per-route client restriction
 
 The tokens file may name each client as `<id>=<token>` (one per line; bare
@@ -298,10 +326,34 @@ Uses the same `~/.config/credproxy/config.toml` hook configuration as `run`.
 
 **Security:** `resolve` outputs only the entries declared in the env-file. Host environment variables are never included in the output — only the resolved secret values cross the process boundary to the caller. This is the interface used by the roost container broker to resolve secrets on behalf of container-side processes.
 
+## credproxy connect — authenticated broker byte stream
+
+`credproxy connect` relays stdin and stdout over one broker connection. It
+copies bytes unchanged and does not interpret HTTP methods, routes, or
+consumers. On Windows it validates the connected server SID and protected
+`credproxyd.exe`, completes the native pipe handshake, and only then begins
+relaying bytes. The verified connection stays open for the whole relay; it is
+never replaced by a second connection.
+
+```sh
+credproxy connect [--socket ENDPOINT] [--server-executable FILE]
+```
+
+With no `--socket`, the command uses the default per-user broker endpoint. A
+Windows bridge can launch this command with stdin/stdout pipes and pass
+`--server-executable` when the daemon binary is not next to `credproxy`. No
+token or secret is passed in command-line arguments. For a one-request HTTP
+bridge, send `Connection: close`, keep helper stdin open until response EOF,
+then close and wait for the helper. Do not use `communicate(input=...)` as a
+write-side half-close signal; Windows named pipes do not support half-close.
+HTTP request framing defines request-body EOF while the response continues over
+the same verified connection. Persistent bridges can keep the helper alive and
+stop it on cancellation.
+
 ## credproxy exec — run a command with a broker route's env injected
 
 `credproxy exec` fetches an env map from a running `credproxyd` over a Unix
-socket and execs a command with those variables injected. Unlike `run`/`resolve`,
+socket or Windows named pipe and runs a command with those variables injected. Unlike `run`/`resolve`,
 the caller cannot name refs or env-files — the only degree of freedom is the
 route name, and the route → ref mapping lives on the daemon side.
 
@@ -312,8 +364,9 @@ credproxy exec --socket "$XDG_RUNTIME_DIR/credproxyd/broker.sock" \
 
 The daemon serves the route via a `body_replace` hook returning
 `{"env":{"NAME":"value", ...}}` (the same schema as `resolve`). The values are
-injected into the child environment only, then `credproxy exec` replaces itself
-via `syscall.Exec`. The route name is charset-restricted (`[a-z0-9_-]+`) so it
+injected into the child environment only. Unix replaces the `credproxy exec`
+process via `syscall.Exec`; Windows starts the child with the same standard
+handles. The route name is charset-restricted (`[a-z0-9_-]+`) so it
 cannot smuggle path segments into the broker URL; a broker error surfaces the
 typed `reason` (see Typed failure reasons) rather than a bare status.
 
@@ -336,11 +389,13 @@ eval "$(credproxy env --token-file ~/.config/credproxyd/token)"
 ```
 
 ```
-credproxy env [--socket S] [--token-file F] [--route R]... [--format sh|json] [--timeout-sec N]
+credproxy env [--socket S] [--server-executable F] [--token-file F] [--route R]... [--format sh|json] [--timeout-sec N]
 ```
 
-- `--socket` defaults to `$XDG_RUNTIME_DIR/credproxyd/broker.sock` (or
-  `/run/user/<uid>/credproxyd/broker.sock` when `XDG_RUNTIME_DIR` is unset).
+- `--socket` defaults to the per-user broker socket on Unix and the
+  `credproxyd-broker-<current SID>` named pipe on Windows.
+- On Windows, `--server-executable` defaults to `credproxyd.exe` next to the
+  running `credproxy`; set it explicitly when the daemon binary is elsewhere.
 - Without `--route`, the routes come from `/_routes` (see Reserved endpoints) and
   their env maps are merged. A route whose body has no `env` key is skipped
   silently — it serves some other credential shape, which is not a failure.
@@ -357,6 +412,10 @@ This runs in shell startup, where a hard failure costs the user their shell
 rather than one credential. Diagnostics go to stderr and name only the route and
 the reason; values reach stdout and nowhere else — not argv, not the log, not an
 error message.
+
+`credproxy refresh [--socket ENDPOINT] [--server-executable FILE]` uses the
+separate admin endpoint. Windows defaults to the current SID's admin named pipe
+and verifies the running daemon executable before sending the refresh request.
 
 ## secretenv — resolver library
 

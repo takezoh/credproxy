@@ -1,7 +1,7 @@
-//go:build !linux
+//go:build !linux && !windows
 
 package admin
 
 import "net"
 
-type uidListener struct{ net.Listener }
+func protectListener(listener net.Listener) net.Listener { return listener }

@@ -4,12 +4,18 @@ package credproxy
 
 import (
 	"net"
+	"os"
 
 	"golang.org/x/sys/unix"
 )
 
 // peerCredSupported reports whether this platform can read peer credentials.
 const peerCredSupported = true
+const peerSIDSupported = false
+
+func peerUIDIsCurrent(pc peerCred) bool {
+	return authorizePeer(pc, true, uint32(os.Getuid()))
+}
 
 // peerCredOf reads SO_PEERCRED from a Unix connection (Linux).
 func peerCredOf(uc *net.UnixConn) (peerCred, error) {

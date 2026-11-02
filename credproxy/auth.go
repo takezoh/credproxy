@@ -65,7 +65,14 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.cfg.RequireSamePeerUID {
 			pc, _ := r.Context().Value(peerCredKey{}).(peerCred)
-			if !authorizePeer(pc, true, s.selfUID) {
+			if !peerUIDIsCurrent(pc) {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+		}
+		if s.cfg.RequirePeerSID != "" {
+			pc, _ := r.Context().Value(peerSIDKey{}).(peerSID)
+			if !authorizeSID(pc, true, s.cfg.RequirePeerSID) {
 				http.Error(w, "forbidden", http.StatusForbidden)
 				return
 			}

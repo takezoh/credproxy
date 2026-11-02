@@ -37,7 +37,7 @@ func startBroker(t *testing.T, provider credproxy.Provider, tokens []credproxy.T
 
 func TestFetchEnv_success(t *testing.T) {
 	sock := startBroker(t, &envProvider{body: `{"env":{"CTX_DATABASE_URL":"postgres://u:p@h/db"}}`}, nil)
-	env, err := fetchEnv(context.Background(), sock, "ctx-sync", "", 5*time.Second)
+	env, err := fetchEnv(context.Background(), sock, "", "ctx-sync", "", 5*time.Second)
 	if err != nil {
 		t.Fatalf("fetchEnv: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestFetchEnv_reasonPropagated(t *testing.T) {
 		Reason: "op_rate_limited",
 		Err:    fmt.Errorf("detail sensitive-blob"),
 	}}, nil)
-	_, err := fetchEnv(context.Background(), sock, "ctx-sync", "", 5*time.Second)
+	_, err := fetchEnv(context.Background(), sock, "", "ctx-sync", "", 5*time.Second)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -67,10 +67,10 @@ func TestFetchEnv_bearerAuth(t *testing.T) {
 	tokens := []credproxy.TokenAuth{{Token: "tok-1", ID: "client-a"}}
 	sock := startBroker(t, &envProvider{body: `{"env":{"A":"1"}}`}, tokens)
 
-	if _, err := fetchEnv(context.Background(), sock, "ctx-sync", "", 5*time.Second); err == nil {
+	if _, err := fetchEnv(context.Background(), sock, "", "ctx-sync", "", 5*time.Second); err == nil {
 		t.Error("expected auth error without token")
 	}
-	env, err := fetchEnv(context.Background(), sock, "ctx-sync", "tok-1", 5*time.Second)
+	env, err := fetchEnv(context.Background(), sock, "", "ctx-sync", "tok-1", 5*time.Second)
 	if err != nil {
 		t.Fatalf("fetchEnv with token: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestFetchEnv_bearerAuth(t *testing.T) {
 
 func TestFetchEnv_missingEnvKey(t *testing.T) {
 	sock := startBroker(t, &envProvider{body: `{"other":true}`}, nil)
-	if _, err := fetchEnv(context.Background(), sock, "ctx-sync", "", 5*time.Second); err == nil {
+	if _, err := fetchEnv(context.Background(), sock, "", "ctx-sync", "", 5*time.Second); err == nil {
 		t.Error("expected error for body without env key")
 	}
 }

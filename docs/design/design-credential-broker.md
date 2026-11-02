@@ -33,7 +33,7 @@ invariants:
     check).
   enforcement: test
 - id: INV-005
-  statement: RequireSamePeerUID admits only same-UID peers over a Unix socket, denies
+  statement: RequireSamePeerUID is Unix-socket-only, admits only same-UID peers, denies
     when peer credentials are unavailable, and is refused on a TCP listener or an
     unsupported platform (fail-closed).
   enforcement: test
@@ -49,6 +49,30 @@ invariants:
 - id: INV-008
   statement: Consumer command selection, executable admission, argv policy, and consumer
     process execution never enter credproxy APIs, configuration, or daemon runtime.
+  enforcement: test
+- id: INV-009
+  statement: A Windows named-pipe client admits a server only when its process token
+    SID matches the current user and its running image has the same file identity
+    as the protected managed executable; image ownership is evaluated independently
+    under the managed-image DACL policy.
+  enforcement: test
+- id: INV-010
+  statement: Windows managed-image owners and write/control-capable trustees are limited
+    to the current user, SYSTEM, Administrators, or TrustedInstaller; every other
+    effective allow ACE is limited to read/execute. Paths reject reparse points and
+    keep every opened ancestor held without write/delete sharing through identity
+    admission.
+  enforcement: test
+- id: INV-011
+  statement: A Windows 1Password token file and its parent/grandparent are owned by
+    the current SID and grant access only to that SID and SYSTEM; reparse components
+    are rejected and token bytes are read from the validated held handle.
+  enforcement: test
+- id: INV-012
+  statement: Windows named-pipe listeners are local-only and first-instance, use an
+    explicit owner/SYSTEM DACL, and admit only clients whose impersonated token SID
+    matches RequirePeerSID (defaulting to the current SID); missing identity fails
+    closed.
   enforcement: test
 boundaries:
   provides:
@@ -79,6 +103,8 @@ failure_responsibilities:
 - Partial secret resolution prevents command execution.
 trust_boundaries:
 - untrusted container client to authenticated host proxy
+- untrusted local named-pipe client to authenticated Windows broker/admin listener
+- local client to the Windows daemon process and managed executable identity
 - provider output to upstream request mutation
 - local owner to private daemon refresh socket
 - opaque secret references to resolved process environment
@@ -91,6 +117,8 @@ source_paths:
 - credproxy/types.go
 - credproxy/server.go
 - cmd/credproxy/env.go
+- internal/nativeipc/client_windows.go
+- internal/winsecurefile/file_windows.go
 - secretenv/resolver.go
 summary: Provider-agnostic authenticated credential injection, forwarding, and secret-resolution
   architecture.
@@ -104,6 +132,12 @@ Broker short-lived credentials to sandboxed processes without giving those proce
 ## Responsibilities
 
 The core authenticates a client, matches a route, asks a Provider for an Injection, and either returns a synthetic body or forwards a planned request. A configured refresh status triggers one Provider refresh and one retry.
+
+On Windows, `internal/nativeipc` owns named-pipe identity and handshake syscalls.
+Before returning a pipe connection to the HTTP client, it checks that the server
+process token belongs to the current user and that the running image matches a
+protected managed executable. Image file ownership and DACL admission are a
+separate integrity policy; they do not stand in for server process identity.
 
 ## Boundaries
 
@@ -126,6 +160,8 @@ header); its own repository owns the operation behind that protocol.
 - Long-lived refresh tokens and private keys remain on the host side of the boundary.
 - A route may be restricted to named clients (`AllowedClientIDs`); token id is attribution, the restriction is what makes it authorization.
 - A Unix-socket server may require same-UID peers (`RequireSamePeerUID`) as defense-in-depth over the 0600 socket, failing closed where peer credentials cannot be read.
+- Windows named-pipe identity uses the explicit peer SID policy and authenticates the server process SID against the current user before HTTP bytes are sent. The expected executable may be owned by the current user, SYSTEM, Administrators, or TrustedInstaller; other principals may receive read/execute rights only. All path components remain held without write/delete sharing through file-identity comparison.
+- Windows 1Password token admission uses a separate confidentiality policy: the token and its parent/grandparent are current-SID-owned, only the current SID and SYSTEM may have allow ACEs, reparse components fail closed, and reads use the validated handle.
 - Hook failures may carry a machine-readable `reason` to the client; only the reason token crosses the boundary, so a hook cannot leak a secret through the error path.
 - `/healthz` and `/_routes` are server-owned paths; a route that collides with one is a startup error, not a shadowed control.
 - Discovery never triggers an upstream request and never advertises a route the caller could not use, so listing routes costs nothing and reveals nothing beyond what the caller may already fetch.

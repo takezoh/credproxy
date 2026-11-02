@@ -1,17 +1,17 @@
 module github.com/takezoh/credproxy
 
-go 1.25.0
+go 1.26.0
 
 require (
+	github.com/1password/onepassword-sdk-go v0.4.1
 	github.com/BurntSushi/toml v1.6.0
-	github.com/fsnotify/fsnotify v1.9.0
+	github.com/Microsoft/go-winio v0.6.4
 	github.com/stretchr/testify v1.11.1
-	golang.org/x/sync v0.20.0
-	golang.org/x/sys v0.40.0
+	golang.org/x/sync v0.23.0
+	golang.org/x/sys v0.49.0
 )
 
 require (
-	github.com/1password/onepassword-sdk-go v0.4.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dylibso/observe-sdk/go v0.0.0-20240828172851-9145d8ad07e1 // indirect
 	github.com/extism/go-sdk v1.7.1 // indirect

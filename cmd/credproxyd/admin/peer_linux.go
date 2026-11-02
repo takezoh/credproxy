@@ -8,6 +8,10 @@ import (
 
 type uidListener struct{ net.Listener }
 
+func protectListener(listener net.Listener) net.Listener {
+	return &uidListener{Listener: listener}
+}
+
 func (l *uidListener) Accept() (net.Conn, error) {
 	for {
 		c, err := l.Listener.Accept()

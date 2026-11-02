@@ -15,6 +15,8 @@ const defaultCredentialTTLSec = 60 * 60
 type Config struct {
 	ListenTCP            string       `toml:"listen_tcp"`
 	ListenUnix           string       `toml:"listen_unix"`
+	ListenPipe           string       `toml:"listen_pipe"`
+	RequirePeerSID       string       `toml:"require_peer_sid"`
 	LogLevel             string       `toml:"log_level"`
 	AuthTokensFile       string       `toml:"auth_tokens_file"`
 	OnePasswordTokenFile string       `toml:"onepassword_token_file"`
@@ -52,6 +54,13 @@ func Load(path string) (*Config, error) {
 	cfg := &Config{LogLevel: "info"}
 	if _, err := toml.DecodeFile(path, cfg); err != nil {
 		return nil, fmt.Errorf("config: decode %s: %w", path, err)
+	}
+	if cfg.ListenTCP == "" && cfg.ListenUnix == "" && cfg.ListenPipe == "" {
+		defaultPipe, err := defaultListenPipe()
+		if err != nil {
+			return nil, fmt.Errorf("config: default named-pipe listener: %w", err)
+		}
+		cfg.ListenPipe = defaultPipe
 	}
 	for i := range cfg.Credentials {
 		if cfg.Credentials[i].TTLSec == 0 {

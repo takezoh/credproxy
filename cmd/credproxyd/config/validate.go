@@ -8,8 +8,11 @@ import (
 
 // validate checks the expanded Config for required fields.
 func validate(c Config) error {
-	if c.ListenTCP == "" && c.ListenUnix == "" {
-		return fmt.Errorf("config: at least one of listen_tcp or listen_unix must be set")
+	if c.ListenTCP == "" && c.ListenUnix == "" && c.ListenPipe == "" {
+		return fmt.Errorf("config: at least one of listen_tcp, listen_unix or listen_pipe must be set")
+	}
+	if c.RequirePeerSID != "" && c.ListenPipe == "" {
+		return fmt.Errorf("config: require_peer_sid requires listen_pipe")
 	}
 	known := make(map[string]Credential)
 	for i, s := range c.Credentials {

@@ -34,6 +34,26 @@ func TestAuthorizePeer(t *testing.T) {
 	}
 }
 
+func TestAuthorizeSIDFailsClosed(t *testing.T) {
+	want := "S-1-5-21-2-4-6-1000"
+	for _, tc := range []struct {
+		name string
+		peer peerSID
+		want bool
+	}{
+		{"matching", peerSID{SID: want, available: true}, true},
+		{"case insensitive", peerSID{SID: "s-1-5-21-2-4-6-1000", available: true}, true},
+		{"wrong", peerSID{SID: "S-1-5-21-2-4-6-1001", available: true}, false},
+		{"missing", peerSID{}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := authorizeSID(tc.peer, true, want); got != tc.want {
+				t.Errorf("authorizeSID(%+v) = %t, want %t", tc.peer, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestNew_requireSamePeerUID_rejectsTCP(t *testing.T) {
 	if !peerCredSupported {
 		t.Skip("peer credentials unsupported on this platform")

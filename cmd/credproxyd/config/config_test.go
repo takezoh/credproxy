@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -101,6 +102,9 @@ refresh_on_status = [401]
 }
 
 func TestLoad_noListeners(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows config defaults to the native broker pipe")
+	}
 	path := writeConfig(t, `
 [[route]]
 path = "/test"

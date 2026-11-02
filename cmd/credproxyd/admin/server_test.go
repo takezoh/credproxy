@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -68,6 +69,9 @@ func TestRefreshErrorDoesNotExposeCause(t *testing.T) {
 }
 
 func TestStartRejectsOccupiedSocketPathBeforeReturning(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix socket path assertion")
+	}
 	path := filepath.Join(t.TempDir(), "admin.sock")
 	if err := os.WriteFile(path, []byte("occupied"), 0o600); err != nil {
 		t.Fatal(err)
@@ -78,6 +82,9 @@ func TestStartRejectsOccupiedSocketPathBeforeReturning(t *testing.T) {
 }
 
 func TestStartDoesNotReplaceLiveSocket(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix socket path assertion")
+	}
 	path := filepath.Join(t.TempDir(), "admin.sock")
 	listener, err := net.Listen("unix", path)
 	if err != nil {

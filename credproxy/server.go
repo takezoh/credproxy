@@ -42,7 +42,6 @@ type PeriodicJob struct {
 type Server struct {
 	cfg          ServerConfig
 	log          *slog.Logger
-	selfUID      uint32
 	tokensMu     sync.RWMutex
 	tokens       []tokenEntry
 	mux          *http.ServeMux
@@ -64,13 +63,8 @@ func New(cfg ServerConfig) (*Server, error) {
 		entries[i] = tokenEntry{token: []byte(t.Token), id: t.ID}
 	}
 
-	if cfg.RequireSamePeerUID {
-		if !peerCredSupported {
-			return nil, errPeerCredUnsupported
-		}
-		if cfg.ListenTCP != "" {
-			return nil, fmt.Errorf("credproxy: RequireSamePeerUID cannot be enforced on a TCP listener")
-		}
+	if err := validatePeerListenerPolicy(cfg); err != nil {
+		return nil, err
 	}
 
 	// A per-route client restriction is meaningless without bearer identities:
@@ -83,11 +77,10 @@ func New(cfg ServerConfig) (*Server, error) {
 	}
 
 	s := &Server{
-		cfg:     cfg,
-		log:     log,
-		selfUID: uint32(os.Getuid()),
-		tokens:  entries,
-		mux:     http.NewServeMux(),
+		cfg:    cfg,
+		log:    log,
+		tokens: entries,
+		mux:    http.NewServeMux(),
 	}
 
 	if err := s.registerRoutes(); err != nil {
@@ -100,6 +93,27 @@ func New(cfg ServerConfig) (*Server, error) {
 		return nil, fmt.Errorf("credproxy: no listeners configured")
 	}
 	return s, nil
+}
+
+func validatePeerListenerPolicy(cfg ServerConfig) error {
+	if cfg.RequireSamePeerUID {
+		if !peerCredSupported {
+			return errPeerCredUnsupported
+		}
+		if cfg.ListenTCP != "" {
+			return fmt.Errorf("credproxy: RequireSamePeerUID cannot be enforced on a TCP listener")
+		}
+	}
+	if cfg.RequirePeerSID == "" {
+		return nil
+	}
+	if !peerSIDSupported {
+		return fmt.Errorf("credproxy: RequirePeerSID is unsupported on this platform")
+	}
+	if cfg.ListenPipe == "" || cfg.ListenTCP != "" || cfg.ListenUnix != "" {
+		return fmt.Errorf("credproxy: RequirePeerSID requires a named-pipe-only listener")
+	}
+	return nil
 }
 
 // Addr returns the resolved TCP listen address (e.g. "127.0.0.1:PORT").
@@ -278,6 +292,14 @@ func (s *Server) openListeners() error {
 		if err := s.openUnixListener(path); err != nil {
 			return err
 		}
+	}
+	if path := s.cfg.ListenPipe; path != "" {
+		ln, err := openPipeListener(path, s.cfg.RequirePeerSID)
+		if err != nil {
+			return err
+		}
+		s.listeners = append(s.listeners, ln)
+		s.log.Info("credproxy: listening", "pipe", path)
 	}
 
 	return nil

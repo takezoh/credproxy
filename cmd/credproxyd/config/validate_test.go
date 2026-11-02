@@ -23,6 +23,18 @@ func TestValidate(t *testing.T) {
 			},
 		},
 		{
+			name: "valid named pipe and peer SID",
+			c: Config{
+				ListenPipe:     `\\.\pipe\credproxyd-broker-S-1-5-21-1-2-3-1000`,
+				RequirePeerSID: "S-1-5-21-1-2-3-1000",
+			},
+		},
+		{
+			name:    "peer SID without named pipe",
+			c:       Config{ListenTCP: "127.0.0.1:9787", RequirePeerSID: "S-1-5-21-1-2-3-1000"},
+			wantErr: true,
+		},
+		{
 			name: "valid credential_command only (no upstream)",
 			c: Config{
 				ListenTCP: "127.0.0.1:9787",

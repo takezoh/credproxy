@@ -90,6 +90,8 @@ type ServerConfig struct {
 	ListenTCP string
 	// ListenUnix is the Unix socket path. Empty means no Unix listener.
 	ListenUnix string
+	// ListenPipe is the Windows named pipe path. Empty means no pipe listener.
+	ListenPipe string
 	// UnixMode is the file mode applied to the Unix socket. Defaults to 0600.
 	UnixMode os.FileMode
 	// AuthTokens is the set of valid bearer tokens.
@@ -106,6 +108,9 @@ type ServerConfig struct {
 	// This is defense-in-depth over the socket's 0600 mode, plus peer PID for
 	// audit attribution — not the primary authorization control.
 	RequireSamePeerUID bool
+	// RequirePeerSID restricts Windows named-pipe clients to this SID. Empty
+	// selects the server process SID. It is unsupported on other transports.
+	RequirePeerSID string
 	// Routes defines the proxy routes.
 	Routes []Route
 	// ShutdownTimeout is the maximum time to wait for in-flight requests when the context is

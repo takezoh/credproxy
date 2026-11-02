@@ -4,12 +4,18 @@ package credproxy
 
 import (
 	"net"
+	"os"
 
 	"golang.org/x/sys/unix"
 )
 
 // peerCredSupported reports whether this platform can read peer credentials.
 const peerCredSupported = true
+const peerSIDSupported = false
+
+func peerUIDIsCurrent(pc peerCred) bool {
+	return authorizePeer(pc, true, uint32(os.Getuid()))
+}
 
 // peerCredOf reads the peer UID from a Unix connection (macOS via getpeereid).
 // Darwin exposes no peer PID through this path, so PID stays zero.

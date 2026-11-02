@@ -21,6 +21,8 @@ func expand(c Config, e envFuncs) (Config, error) {
 	if err != nil {
 		return c, fmt.Errorf("listen_unix: %w", err)
 	}
+	c.ListenPipe = e.getenv(c.ListenPipe)
+	c.RequirePeerSID = e.getenv(c.RequirePeerSID)
 	c.AuthTokensFile, err = expandPath(e.getenv(c.AuthTokensFile), e.home)
 	if err != nil {
 		return c, fmt.Errorf("auth_tokens_file: %w", err)

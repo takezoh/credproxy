@@ -59,7 +59,7 @@ func startBrokerRoutes(t *testing.T, routes []credproxy.Route, tokens []credprox
 	addr := srv.Addr()
 	prev := brokerDialer
 	t.Cleanup(func() { brokerDialer = prev })
-	brokerDialer = func(ctx context.Context, socketPath string) (net.Conn, error) {
+	brokerDialer = func(ctx context.Context, socketPath, _ string) (net.Conn, error) {
 		// The client must still route by the path it was given; a seam that
 		// ignored it would hide a wiring mistake in every test below.
 		if socketPath != sock {

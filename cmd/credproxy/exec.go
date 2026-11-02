@@ -12,7 +12,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -23,55 +22,86 @@ const maxEnvResponse = 1 << 20 // 1 MiB
 const maxErrorBody = 4096
 
 // execCmd implements "credproxy exec": fetch an env map for a broker-defined
-// route over a Unix socket and exec the command with those variables injected.
+// route over the local broker transport and exec the command with those variables injected.
 //
 // Unlike "run"/"resolve", the caller cannot name refs or env-files — the only
 // degree of freedom is the route name, and the route → ref mapping lives on the
 // daemon side. This is the client half of the fixed-wrapper pattern: agents get
 // "which wrapper to call", never "which secret to resolve".
 func execCmd(args []string) error {
+	options, cmdArgs, err := parseExecOptions(args)
+	if err != nil {
+		return err
+	}
+	socketPath := options.socket
+	if socketPath == "" {
+		socketPath = defaultExecEndpoint()
+	}
+	if socketPath == "" {
+		return fmt.Errorf("--socket is required")
+	}
+	token, err := readExecToken(options.tokenFile)
+	if err != nil {
+		return err
+	}
+	expectedExe, err := expectedServerExecutable(options.serverExecutable)
+	if err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), commandSignals()...)
+	defer stop()
+	env, err := fetchEnv(ctx, socketPath, expectedExe, options.route, token, options.timeout)
+	if err != nil {
+		return err
+	}
+	bin, err := exec.LookPath(cmdArgs[0])
+	if err != nil {
+		return fmt.Errorf("lookup %s: %w", cmdArgs[0], err)
+	}
+	return execProcess(bin, cmdArgs, mergeEnv(os.Environ(), env))
+}
+
+type execOptions struct {
+	socket           string
+	serverExecutable string
+	route            string
+	tokenFile        string
+	timeout          time.Duration
+}
+
+func parseExecOptions(args []string) (execOptions, []string, error) {
 	fs := flag.NewFlagSet("exec", flag.ContinueOnError)
-	socket := fs.String("socket", "", "credproxyd Unix socket path (required)")
+	socket := fs.String("socket", "", "credproxyd Unix socket or named-pipe endpoint")
+	serverExecutable := fs.String("server-executable", "", "expected protected credproxyd executable on Windows")
 	route := fs.String("route", "", "broker route name to fetch env from (required)")
 	tokenFile := fs.String("token-file", "", "file containing the bearer token (optional)")
 	timeoutSec := fs.Int("timeout-sec", 10, "broker request timeout in seconds")
 
 	flagArgs, cmdArgs := splitAtDashDash(args)
 	if err := fs.Parse(flagArgs); err != nil {
-		return err
-	}
-	if *socket == "" {
-		return fmt.Errorf("--socket is required")
+		return execOptions{}, nil, err
 	}
 	if !validRouteName(*route) {
-		return fmt.Errorf("--route must match [a-z0-9_-]+")
+		return execOptions{}, nil, fmt.Errorf("--route must match [a-z0-9_-]+")
 	}
 	if len(cmdArgs) == 0 {
-		return fmt.Errorf("command is required after --")
+		return execOptions{}, nil, fmt.Errorf("command is required after --")
 	}
+	return execOptions{
+		socket: *socket, serverExecutable: *serverExecutable, route: *route,
+		tokenFile: *tokenFile, timeout: time.Duration(*timeoutSec) * time.Second,
+	}, cmdArgs, nil
+}
 
-	var token string
-	if *tokenFile != "" {
-		data, err := os.ReadFile(*tokenFile)
-		if err != nil {
-			return fmt.Errorf("token file: %w", err)
-		}
-		token = strings.TrimSpace(string(data))
+func readExecToken(path string) (string, error) {
+	if path == "" {
+		return "", nil
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	env, err := fetchEnv(ctx, *socket, *route, token, time.Duration(*timeoutSec)*time.Second)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return err
+		return "", fmt.Errorf("token file: %w", err)
 	}
-
-	bin, err := exec.LookPath(cmdArgs[0])
-	if err != nil {
-		return fmt.Errorf("lookup %s: %w", cmdArgs[0], err)
-	}
-	return syscall.Exec(bin, cmdArgs, mergeEnv(os.Environ(), env))
+	return strings.TrimSpace(string(data)), nil
 }
 
 // validRouteName restricts the only caller-controlled request component so it
@@ -88,30 +118,15 @@ func validRouteName(s string) bool {
 	return true
 }
 
-// brokerDialer opens the transport for a broker request. credproxyd is reachable
-// over its Unix socket and nothing else: the socket's 0600 mode and the
-// SO_PEERCRED check behind it are the access control, so the client has no TCP
-// mode to offer and gains none from this indirection.
-//
-// It is a package-level variable purely so tests can substitute a loopback
-// transport. Some sandboxes deny AF_UNIX outright, and without this seam every
-// test of route discovery, merging, shell quoting and error handling would be
-// unrunnable there — not merely untested over a socket. Nothing outside tests
-// reassigns it.
-var brokerDialer = func(ctx context.Context, socketPath string) (net.Conn, error) {
-	var d net.Dialer
-	return d.DialContext(ctx, "unix", socketPath)
-}
-
 // brokerGet performs an authenticated GET against the broker's Unix socket and
 // returns the response on 200, or a typed error otherwise. path is appended to
 // the fixed host and must already be caller-validated.
-func brokerGet(ctx context.Context, socketPath, path, token string, timeout time.Duration) (*http.Response, error) {
+func brokerGet(ctx context.Context, socketPath, expectedExe, path, token string, timeout time.Duration) (*http.Response, error) {
 	client := &http.Client{
 		Timeout: timeout,
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				return brokerDialer(ctx, socketPath)
+				return brokerDialer(ctx, socketPath, expectedExe)
 			},
 		},
 	}
@@ -139,8 +154,8 @@ func brokerGet(ctx context.Context, socketPath, path, token string, timeout time
 // map, using the same {"env":{...}} schema as "credproxy resolve". A body
 // without an "env" key yields (nil, nil): that route serves some other
 // credential shape (e.g. a synthetic AWS endpoint) and is not an env source.
-func fetchRouteEnv(ctx context.Context, socketPath, route, token string, timeout time.Duration) (map[string]string, error) {
-	resp, err := brokerGet(ctx, socketPath, route+"/", token, timeout)
+func fetchRouteEnv(ctx context.Context, socketPath, expectedExe, route, token string, timeout time.Duration) (map[string]string, error) {
+	resp, err := brokerGet(ctx, socketPath, expectedExe, route+"/", token, timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -158,8 +173,8 @@ func fetchRouteEnv(ctx context.Context, socketPath, route, token string, timeout
 
 // fetchEnv is the strict variant used by "exec", where a route that serves no
 // env is a misconfiguration rather than something to skip.
-func fetchEnv(ctx context.Context, socketPath, route, token string, timeout time.Duration) (map[string]string, error) {
-	env, err := fetchRouteEnv(ctx, socketPath, route, token, timeout)
+func fetchEnv(ctx context.Context, socketPath, expectedExe, route, token string, timeout time.Duration) (map[string]string, error) {
+	env, err := fetchRouteEnv(ctx, socketPath, expectedExe, route, token, timeout)
 	if err != nil {
 		return nil, err
 	}

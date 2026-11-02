@@ -85,6 +85,8 @@ func run() error {
 	srv, err := credproxy.New(credproxy.ServerConfig{
 		ListenTCP:            cfg.ListenTCP,
 		ListenUnix:           cfg.ListenUnix,
+		ListenPipe:           cfg.ListenPipe,
+		RequirePeerSID:       cfg.RequirePeerSID,
 		AuthTokens:           tokens,
 		AllowUnauthenticated: cfg.ListenTCP == "" && len(tokens) == 0,
 		Routes:               routes,
