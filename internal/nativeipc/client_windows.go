@@ -25,7 +25,8 @@ func DialPipe(ctx context.Context, path, expectedExecutable string) (net.Conn, e
 	if strings.TrimSpace(expectedExecutable) == "" {
 		return nil, fmt.Errorf("expected managed server executable is required")
 	}
-	conn, err := winio.DialPipeContext(ctx, path)
+	// Identification lets the server inspect our SID without impersonating us.
+	conn, err := winio.DialPipeAccessImpLevel(ctx, path, windows.GENERIC_READ|windows.GENERIC_WRITE, winio.PipeImpLevelIdentification)
 	if err != nil {
 		return nil, err
 	}

@@ -23,7 +23,7 @@ func TestPipeListenerCapturesCurrentSID(t *testing.T) {
 	}
 	defer listener.Close()
 	accepted := acceptAsync(listener)
-	client, err := winio.DialPipeContext(context.Background(), path)
+	client, err := winio.DialPipeAccessImpLevel(context.Background(), path, windows.GENERIC_READ|windows.GENERIC_WRITE, winio.PipeImpLevelIdentification)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestPipeListenerRejectsWrongSID(t *testing.T) {
 	}
 	defer listener.Close()
 	accepted := acceptAsync(listener)
-	client, err := winio.DialPipeContext(context.Background(), listener.Addr().String())
+	client, err := winio.DialPipeAccessImpLevel(context.Background(), listener.Addr().String(), windows.GENERIC_READ|windows.GENERIC_WRITE, winio.PipeImpLevelIdentification)
 	if err != nil {
 		t.Fatal(err)
 	}
