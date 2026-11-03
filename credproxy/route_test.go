@@ -701,3 +701,44 @@ func (p *refreshReasonErrProvider) Get(_ context.Context, _ credproxy.Request) (
 func (p *refreshReasonErrProvider) Refresh(_ context.Context, _ credproxy.Request) (*credproxy.Injection, error) {
 	return nil, p.refreshErr
 }
+
+func TestRouteHandler_preservesPostBodies(t *testing.T) {
+	for _, retry := range []bool{false, true} {
+		for _, size := range []int{17, (1 << 20) + 19} {
+			t.Run(fmt.Sprintf("retry=%t/size=%d", retry, size), func(t *testing.T) {
+				body := strings.Repeat("x", size)
+				calls := 0
+				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					calls++
+					got, err := io.ReadAll(r.Body)
+					if err != nil || string(got) != body {
+						t.Errorf("body length=%d, want=%d; error=%v", len(got), len(body), err)
+					}
+					if retry && calls == 1 {
+						w.WriteHeader(http.StatusUnauthorized)
+					}
+				}))
+				defer upstream.Close()
+				provider := &refreshTrackingProvider{getInj: &credproxy.Injection{}, refreshInj: &credproxy.Injection{}}
+				route := credproxy.Route{Path: "/api", Upstream: upstream.URL, Provider: provider}
+				if retry {
+					route.RefreshOnStatus = []int{http.StatusUnauthorized}
+				}
+				addr := startRouteTestServer(t, route)
+				resp, err := http.Post("http://"+addr+"/api", "application/json", strings.NewReader(body))
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, _ = io.Copy(io.Discard, resp.Body)
+				_ = resp.Body.Close()
+				wantCalls := 1
+				if retry && size <= 1<<20 {
+					wantCalls = 2
+				}
+				if calls != wantCalls {
+					t.Errorf("upstream calls=%d, want=%d", calls, wantCalls)
+				}
+			})
+		}
+	}
+}

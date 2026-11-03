@@ -81,11 +81,14 @@ func (h *routeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		// If the body exceeded the limit, forward once without enabling retry.
 		if len(body) > maxBodyBuffer {
-			body = body[:maxBodyBuffer]
+			r.Body = struct {
+				io.Reader
+				io.Closer
+			}{io.MultiReader(bytes.NewReader(body), r.Body), r.Body}
+			body = nil
+		} else {
+			_ = r.Body.Close()
 		}
-	}
-	if r.Body != nil {
-		_ = r.Body.Close()
 	}
 
 	clientID, _ := r.Context().Value(tokenIDKey{}).(string)
@@ -139,7 +142,8 @@ func (h *routeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // body is discarded and errNeedsRefresh is returned to trigger ErrorHandler.
 // For all other responses the body streams transparently to the client.
 func (h *routeHandler) modifyResponse(resp *http.Response) error {
-	if !needsRefresh(h.cfg.RefreshOnStatus, resp.StatusCode) {
+	state, _ := resp.Request.Context().Value(retryStateKey{}).(*retryState)
+	if state == nil || state.body == nil || !needsRefresh(h.cfg.RefreshOnStatus, resp.StatusCode) {
 		return nil
 	}
 	_ = resp.Body.Close()
@@ -206,8 +210,10 @@ func (h *routeHandler) writeCredentialError(w http.ResponseWriter, err error, fa
 // applyPlan returns a clone of r with the requestPlan mutations applied.
 func applyPlan(r *http.Request, body []byte, p requestPlan) *http.Request {
 	req := r.Clone(r.Context())
-	req.Body = io.NopCloser(bytes.NewReader(body))
-	req.ContentLength = int64(len(body))
+	if body != nil {
+		req.Body = io.NopCloser(bytes.NewReader(body))
+		req.ContentLength = int64(len(body))
+	}
 	for _, k := range p.deleteHeaders {
 		req.Header.Del(k)
 	}
