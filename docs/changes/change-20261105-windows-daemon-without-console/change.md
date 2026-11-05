@@ -2,7 +2,7 @@
 id: change-20261105-windows-daemon-without-console
 kind: change
 title: Run credproxyd on Windows without a console window
-status: closing
+status: done
 created: '2026-11-05'
 profile: sdd@1
 intent: Run credproxyd on Windows without a console window that stops the daemon when
@@ -81,7 +81,13 @@ evidence_refs:
   ref: cmd/credproxyd/logging.go
 - type: source
   ref: install.ps1
+- type: command
+  ref: Windows 11 agent-environments update.ps1 -Module credproxy -> exit 0; pulled
+    7fa1119, rebuilt, restarted the task (2026-11-05)
 promotion_applied_at: '2026-11-05T13:56:22.140279+00:00'
+closure:
+  closed_at: '2026-11-05T14:11:55.114436+00:00'
+  content_hash: sha256:c46df4910528a2843426fe031e5dd4cf551d4f3e00ad46ee6c9a1774a06ee36f
 ---
 
 ## Summary
@@ -90,8 +96,7 @@ The consuming environment starts credproxyd on Windows from a logon task in the 
 
 ## Closure Notes
 
-The promotion to design-daemon-hook-runtime (INV-003) is applied. `docs close` and `docs lint --conformance` currently stop with an exception in this repository because its design boundaries are plain strings, which the current dev-docs conformance check cannot read. That predates this change; the scaffold also lacks the issue kind, so the finding could not be filed as an issue. Migrating the docs to the current dev-docs contract is separate work; close this change after that migration.
-
+The promotion to design-daemon-hook-runtime (INV-003) is applied. Closing first stopped with an exception because this repository's designs still used the older dev-docs format (plain-string boundary items). The docs were then migrated to the current dev-docs contract, and the change was closed.
 
 {% transition from="draft" to="ready" date="2026-11-05" %}
 Requirements, implementation and promotion are recorded.
