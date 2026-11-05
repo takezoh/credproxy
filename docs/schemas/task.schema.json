@@ -14,14 +14,6 @@
       "type": "string",
       "pattern": "^change-[0-9]{8}-[a-z0-9][a-z0-9-]*$"
     },
-    "plan": {
-      "type": "string",
-      "pattern": "^plan-[0-9]{8}-[a-z0-9][a-z0-9-]*$"
-    },
-    "blockers": {
-      "type": "array",
-      "items": {"type": "string", "pattern": "^task-[0-9]{8}-[a-z0-9][a-z0-9-]*$"}
-    },
     "assignee": {"type": "string"},
     "files_touched": {
       "type": "array",
@@ -35,19 +27,13 @@
     },
     "pinned_context": {
       "type": "array",
-      "description": "[pilot] adr-20260710-decomposer-brief-and-loc-cap: この task が実装時に参照すべき ADR id + 参照コード path。plan.md 全文を読み直す暗黙依存を排除 (Anthropic subagent brief + Cognition pinned_context)。例: 'adr-20260709-optin-mechanical-triggers' or 'docs/schemas/spec.schema.json#L1-L60'",
+      "description": "実装判断に必要な契約・根拠・コードの参照。",
       "items": {"type": "string"}
     },
     "done_criteria": {
       "type": "array",
-      "description": "[x-tentative] adr-20260710-decomposer-brief-and-loc-cap: acceptance と別の完了条件 (何度も readback しないように明示)。'output_format' に相当。cut point が 3 task 以上で確立するまで tentative — 6 ヶ月経過して未使用なら削除",
+      "description": "観察可能なtaskの完了条件。",
       "items": {"type": "string"}
-    },
-    "max_diff_loc": {
-      "type": "integer",
-      "minimum": 1,
-      "default": 300,
-      "description": "adr-20260710-decomposer-brief-and-loc-cap: PR size 上限 (default 300 — Bacchelli 実証で defect 検出 sweet spot 200-400 LOC)。実行主体はこの上限を超えた差分を再分解の判断材料として扱う"
     }
   }
 }

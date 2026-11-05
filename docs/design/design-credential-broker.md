@@ -76,40 +76,62 @@ invariants:
   enforcement: test
 boundaries:
   provides:
-  - authenticated HTTP proxy routes and synthetic credential endpoints
-  - Provider, Store, container provider, and secret resolver contracts
+  - id: BND-PROVIDES-001
+    statement: authenticated HTTP proxy routes and synthetic credential endpoints
+  - id: BND-PROVIDES-002
+    statement: Provider, Store, container provider, and secret resolver contracts
   consumes:
-  - caller-owned credential Providers and hooks
-  - host networking and credential stores
+  - id: BND-CONSUMES-001
+    statement: caller-owned credential Providers and hooks
+  - id: BND-CONSUMES-002
+    statement: host networking and credential stores
   forbidden:
-  - provider-specific authentication flows in the credproxy package
-  - mounting long-lived host credential stores into containers
-  - selecting, validating, or executing a credential consumer command
+  - id: BND-FORBIDDEN-001
+    statement: provider-specific authentication flows in the credproxy package
+  - id: BND-FORBIDDEN-002
+    statement: mounting long-lived host credential stores into containers
+  - id: BND-FORBIDDEN-003
+    statement: selecting, validating, or executing a credential consumer command
 variability:
   fixed:
-  - provider-agnostic request planning and one-refresh retry
-  - authenticated-by-default TCP behavior
+  - id: VAR-FIXED-001
+    statement: provider-agnostic request planning and one-refresh retry
+  - id: VAR-FIXED-002
+    statement: authenticated-by-default TCP behavior
   free:
-  - route prefixes, upstreams, refresh statuses, and Provider implementations
-  - in-process or shared-daemon deployment
+  - id: VAR-FREE-001
+    statement: route prefixes, upstreams, refresh statuses, and Provider implementations
+  - id: VAR-FREE-002
+    statement: in-process or shared-daemon deployment
 capabilities:
 - id: cap:credential-broker
   uniqueness: per-boundary
 - id: cap:secret-resolution
   uniqueness: multiple
 failure_responsibilities:
-- Provider and hook failures become observable proxy errors and are never treated
-  as empty credentials.
-- Partial secret resolution prevents command execution.
+- id: FAIL-001
+  statement: Provider and hook failures become observable proxy errors and are never
+    treated as empty credentials.
+- id: FAIL-002
+  statement: Partial secret resolution prevents command execution.
 trust_boundaries:
-- untrusted container client to authenticated host proxy
-- untrusted local named-pipe client to authenticated Windows broker/admin listener
-- local client to the Windows daemon process and managed executable identity
-- provider output to upstream request mutation
-- local owner to private daemon refresh socket
-- opaque secret references to resolved process environment
+- id: TRUST-001
+  statement: untrusted container client to authenticated host proxy
+- id: TRUST-002
+  statement: untrusted local named-pipe client to authenticated Windows broker/admin
+    listener
+- id: TRUST-003
+  statement: local client to the Windows daemon process and managed executable identity
+- id: TRUST-004
+  statement: provider output to upstream request mutation
+- id: TRUST-005
+  statement: local owner to private daemon refresh socket
+- id: TRUST-006
+  statement: opaque secret references to resolved process environment
 compatibility_policies:
-- Provider and Injection semantics remain stable across in-process and daemon modes.
+- id: COMPAT-001
+  statement: Provider and Injection semantics remain stable across in-process and
+    daemon modes.
 tags: []
 owners: []
 relations: []

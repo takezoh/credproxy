@@ -28,32 +28,45 @@ invariants:
   enforcement: test
 boundaries:
   provides:
-  - credproxyd TCP and Unix-socket service
-  - ScriptProvider hook protocol
+  - id: BND-PROVIDES-001
+    statement: credproxyd TCP and Unix-socket service
+  - id: BND-PROVIDES-002
+    statement: ScriptProvider hook protocol
   consumes:
-  - user-owned hook commands and local configuration
+  - id: BND-CONSUMES-001
+    statement: user-owned hook commands and local configuration
   forbidden:
-  - interpreting provider-specific hook payload fields in the daemon core
-  - silently continuing after hook timeout or malformed output
+  - id: BND-FORBIDDEN-001
+    statement: interpreting provider-specific hook payload fields in the daemon core
+  - id: BND-FORBIDDEN-002
+    statement: silently continuing after hook timeout or malformed output
 variability:
   fixed:
-  - hook action/request/context envelope and timeout/error semantics
-  - local authenticated listener defaults
+  - id: VAR-FIXED-001
+    statement: hook action/request/context envelope and timeout/error semantics
+  - id: VAR-FIXED-002
+    statement: local authenticated listener defaults
   free:
-  - configured routes, commands, TTLs, and upstreams
+  - id: VAR-FREE-001
+    statement: configured routes, commands, TTLs, and upstreams
 capabilities:
 - id: cap:credential-daemon
   uniqueness: per-boundary
 - id: cap:script-provider
   uniqueness: multiple
 failure_responsibilities:
-- Invalid config fails startup; hook timeout, exit failure, or malformed JSON fails
-  the request.
+- id: FAIL-001
+  statement: Invalid config fails startup; hook timeout, exit failure, or malformed
+    JSON fails the request.
 trust_boundaries:
-- authenticated local client to daemon
-- daemon process to user-owned hook subprocess
+- id: TRUST-001
+  statement: authenticated local client to daemon
+- id: TRUST-002
+  statement: daemon process to user-owned hook subprocess
 compatibility_policies:
-- Hook protocol additions must preserve existing fields and one-line JSON framing.
+- id: COMPAT-001
+  statement: Hook protocol additions must preserve existing fields and one-line JSON
+    framing.
 tags: []
 owners: []
 relations: []

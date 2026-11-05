@@ -7,11 +7,11 @@
   "properties": {
     "id": {
       "type": "string",
-      "pattern": "^((change|adr|plan|spec|task|note|component|ux)-[0-9]{8}-[a-z0-9][a-z0-9-]*|design-[a-z0-9][a-z0-9-]*)$",
-      "description": "change/ADR/task/note are dated; persistent design IDs are stable and undated"
+      "pattern": "^((change|adr|task|note|issue)-[0-9]{8}-[a-z0-9][a-z0-9-]*|design-[a-z0-9][a-z0-9-]*)$",
+      "description": "change/ADR/task/note/issue are dated; persistent design IDs are stable and undated"
     },
     "kind": {
-      "enum": ["change", "design", "adr", "plan", "spec", "task", "note", "component", "ux"]
+      "enum": ["change", "design", "adr", "task", "note", "issue"]
     },
     "title": {
       "type": "string",
@@ -84,7 +84,7 @@
           },
           "target": {
             "type": "string",
-            "pattern": "^((change|adr|plan|spec|task|note|component|ux)-[0-9]{8}-[a-z0-9][a-z0-9-]*|design-[a-z0-9][a-z0-9-]*)$"
+            "pattern": "^((change|adr|task|note|issue)-[0-9]{8}-[a-z0-9][a-z0-9-]*|design-[a-z0-9][a-z0-9-]*)$"
           }
         }
       }

@@ -22,6 +22,12 @@
       "allowed_attrs": ["id", "kind"],
       "purpose": "ADR's Consequence (kind: positive|negative|neutral)."
     },
+    "confirmation": {
+      "block": true,
+      "required_attrs": [],
+      "allowed_attrs": ["kind"],
+      "purpose": "ADR's optional confirmation evidence body."
+    },
     "req": {
       "block": true,
       "required_attrs": ["id"],

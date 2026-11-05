@@ -23,29 +23,19 @@
       "items": {"type": "string", "minLength": 1}
     },
     "consequences": {
-      "description": "spec-detail (2026-07-09): Nygard 対称 positive/negative/neutral 三極 (adr-20260709-adr-consequences-tripolar)。dual-format 期は array (既存 = spec-detail 導入前) も accept。三極義務化の enforcement は forward-only + touched-only (created >= 2026-07-09 で三極必須)、strict enforcement は docs/scripts/schema_validate.py 側で判定。skills/design/knowledge/artifact-semantics.md §18 が SoT。",
-      "oneOf": [
-        {
-          "type": "array",
-          "description": "legacy array form — spec-detail 導入前 ADR に対する後方互換 (FR-008)",
-          "items": {"type": "string", "minLength": 1}
-        },
-        {
-          "type": "object",
-          "description": "tripolar form — 新規 ADR (created >= 2026-07-09) に強制",
-          "additionalProperties": false,
-          "required": ["positive", "negative", "neutral"],
-          "properties": {
-            "positive": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "description": "採用の望ましい帰結"},
-            "negative": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "description": "採用の望ましくない帰結 — 空は Nygard 対称ルール違反"},
-            "neutral":  {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "description": "採用に伴う中立な帰結 (副次的影響 / 相互作用 / 前提維持)"}
-          }
-        }
-      ]
+      "description": "Nygard 形式の正・負・中立の三極を記録する。検証はADR作成日や編集履歴に依存しない。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["positive", "negative", "neutral"],
+      "properties": {
+        "positive": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "description": "採用の望ましい帰結"},
+        "negative": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "description": "採用の望ましくない帰結"},
+        "neutral":  {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "description": "採用に伴う中立な帰結"}
+      }
     },
     "confirmation": {
       "type": "string",
-      "description": "spec-detail (2026-07-09): MADR 由来 (optional)。この decision が守られていることを機械的に確認する手段の宣言 (fitness function / grep / test)。skills/design/knowledge/artifact-semantics.md §18 が SoT。"
+      "description": "spec-detail (2026-07-09): MADR 由来 (optional)。この decision が守られていることを機械的に確認する手段の宣言 (fitness function / grep / test)。artifacts/architecture-contract/semantics.md §18 が SoT。"
     },
     "decision_bindings": {
       "type": "array",

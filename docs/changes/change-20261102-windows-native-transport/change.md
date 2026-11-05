@@ -7,7 +7,14 @@ created: '2026-11-02'
 profile: sdd@1
 intent: Make native Windows credential delivery possible without weakening identity
   checks.
-outcomes: []
+outcomes:
+- On Windows, credproxyd serves the broker API and the admin refresh endpoint on a
+  local named pipe restricted to the owner SID and SYSTEM, and authenticates each
+  client by its token SID.
+- Before sending any token or secret-bearing request, Windows clients verify the pipe
+  server's process identity and owner SID.
+- On Windows, the 1Password service-account token file and its parent directories
+  are verified by owner SID and a restrictive DACL, rejecting reparse points.
 scope:
 - credproxy/
 - cmd/
@@ -18,7 +25,8 @@ scope:
 - README.md
 - docs/
 non_goals: []
-change_classes: []
+change_classes:
+- capability
 governance:
   gate: auto
   reasons: []

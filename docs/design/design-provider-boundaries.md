@@ -21,29 +21,40 @@ invariants:
   enforcement: test
 boundaries:
   provides:
-  - HTTP Provider Get/Refresh contract
-  - container Provider Init/Routes/ContainerSpec contract
+  - id: BND-PROVIDES-001
+    statement: HTTP Provider Get/Refresh contract
+  - id: BND-PROVIDES-002
+    statement: container Provider Init/Routes/ContainerSpec contract
   consumes:
-  - host AWS, gcloud, and ssh-agent facilities
+  - id: BND-CONSUMES-001
+    statement: host AWS, gcloud, and ssh-agent facilities
   forbidden:
-  - bind-mounting host refresh-token stores or unrestricted host SSH agent sockets
+  - id: BND-FORBIDDEN-001
+    statement: bind-mounting host refresh-token stores or unrestricted host SSH agent
+      sockets
 variability:
   fixed:
-  - caller/provider ownership of backend knowledge and cache policy
+  - id: VAR-FIXED-001
+    statement: caller/provider ownership of backend knowledge and cache policy
   free:
-  - HTTP route, bind mount, bridge, or combined delivery mechanism
+  - id: VAR-FREE-001
+    statement: HTTP route, bind mount, bridge, or combined delivery mechanism
 capabilities:
 - id: cap:credential-provider
   uniqueness: multiple
 failure_responsibilities:
-- Each provider validates its configuration and cleans up its host-side processes
-  and sockets.
+- id: FAIL-001
+  statement: Each provider validates its configuration and cleans up its host-side
+    processes and sockets.
 trust_boundaries:
-- host credential backend to provider package
-- provider-generated short-lived artifact to container
+- id: TRUST-001
+  statement: host credential backend to provider package
+- id: TRUST-002
+  statement: provider-generated short-lived artifact to container
 compatibility_policies:
-- New providers implement existing public interfaces instead of adding backend switches
-  to the core.
+- id: COMPAT-001
+  statement: New providers implement existing public interfaces instead of adding
+    backend switches to the core.
 tags: []
 owners: []
 relations: []

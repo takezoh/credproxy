@@ -13,11 +13,13 @@
         "statement": {"type": "string", "minLength": 1}
       }
     },
-    "legacyOrStableStatement": {
-      "oneOf": [
-        {"type": "string", "minLength": 1},
-        {"$ref": "#/$defs/stableStatement"}
-      ]
+    "forbiddenBoundary": {
+      "type": "object", "required": ["id", "statement"], "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "pattern": "^[A-Z][A-Z0-9-]*-[0-9]{3,4}$"},
+        "statement": {"type": "string", "minLength": 1},
+        "target": {"type": "string", "pattern": "^design-[a-z0-9][a-z0-9-]*$", "description": "Optional design explicitly forbidden as a dependency; repository conformance checks matching dependsOn relations."}
+      }
     }
   },
   "required": ["scope_type", "responsibilities", "invariants", "boundaries", "variability", "capabilities", "failure_responsibilities", "trust_boundaries", "compatibility_policies"],
@@ -40,11 +42,11 @@
     "boundaries": {
       "type": "object", "additionalProperties": false,
       "required": ["provides", "consumes", "forbidden"],
-      "properties": {"provides": {"type": "array", "items": {"$ref": "#/$defs/legacyOrStableStatement"}}, "consumes": {"type": "array", "items": {"$ref": "#/$defs/legacyOrStableStatement"}}, "forbidden": {"type": "array", "items": {"$ref": "#/$defs/legacyOrStableStatement"}}}
+      "properties": {"provides": {"type": "array", "items": {"$ref": "#/$defs/stableStatement"}}, "consumes": {"type": "array", "items": {"$ref": "#/$defs/stableStatement"}}, "forbidden": {"type": "array", "items": {"$ref": "#/$defs/forbiddenBoundary"}}}
     },
     "variability": {
       "type": "object", "required": ["fixed", "free"], "additionalProperties": false,
-      "properties": {"fixed": {"type": "array", "items": {"$ref": "#/$defs/legacyOrStableStatement"}}, "free": {"type": "array", "items": {"$ref": "#/$defs/legacyOrStableStatement"}}}
+      "properties": {"fixed": {"type": "array", "items": {"$ref": "#/$defs/stableStatement"}}, "free": {"type": "array", "items": {"$ref": "#/$defs/stableStatement"}}}
     },
     "capabilities": {
       "type": "array", "items": {
@@ -52,8 +54,8 @@
         "properties": {"id": {"type": "string", "pattern": "^cap:[a-z0-9][a-z0-9-]*$"}, "uniqueness": {"enum": ["global", "per-platform", "per-boundary", "multiple"]}}
       }
     },
-    "failure_responsibilities": {"type": "array", "items": {"$ref": "#/$defs/legacyOrStableStatement"}},
-    "trust_boundaries": {"type": "array", "items": {"$ref": "#/$defs/legacyOrStableStatement"}},
-    "compatibility_policies": {"type": "array", "items": {"$ref": "#/$defs/legacyOrStableStatement"}}
+    "failure_responsibilities": {"type": "array", "items": {"$ref": "#/$defs/stableStatement"}},
+    "trust_boundaries": {"type": "array", "items": {"$ref": "#/$defs/stableStatement"}},
+    "compatibility_policies": {"type": "array", "items": {"$ref": "#/$defs/stableStatement"}}
   }
 }
