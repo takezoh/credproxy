@@ -25,16 +25,26 @@ if ([string]::IsNullOrEmpty($env:BINDIR)) {
 $binDir = [System.IO.Path]::GetFullPath($binDir)
 [System.IO.Directory]::CreateDirectory($binDir) | Out-Null
 
+# The daemon is built without a console on Windows. The Task Scheduler starts it
+# in the user's session, where a console program gets a window that stops the
+# daemon when it is closed. The client stays a console program for terminals.
 $targets = @(
-    @{ Name = "credproxyd.exe"; Package = "./cmd/credproxyd" },
-    @{ Name = "credproxy.exe"; Package = "./cmd/credproxy" }
+    @{ Name = "credproxyd.exe"; Package = "./cmd/credproxyd"; NoConsole = $true },
+    @{ Name = "credproxy.exe"; Package = "./cmd/credproxy"; NoConsole = $false }
 )
+$runningOnWindows = [System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT
+$callerGoFlags = $env:GOFLAGS
 
 Push-Location -LiteralPath $repoDir
 try {
     Write-Host "credproxy: building credproxyd + credproxy -> $binDir"
     foreach ($target in $targets) {
         $outputPath = Join-Path $binDir $target.Name
+        if ($runningOnWindows -and $target.NoConsole) {
+            $env:GOFLAGS = ("$callerGoFlags -ldflags=-H=windowsgui").Trim()
+        } else {
+            $env:GOFLAGS = $callerGoFlags
+        }
         & $goCommand.Path build -o $outputPath $target.Package
         $buildExitCode = $LASTEXITCODE
         if ($buildExitCode -ne 0) {
@@ -42,6 +52,7 @@ try {
         }
     }
 } finally {
+    $env:GOFLAGS = $callerGoFlags
     Pop-Location
 }
 

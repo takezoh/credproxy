@@ -62,7 +62,7 @@ func TestConsumerCommandsStayOutsideCredproxy(t *testing.T) {
 			}
 			if entry.IsDir() {
 				rel, _ := filepath.Rel(root, path)
-				if strings.HasPrefix(rel, "cmd/credproxyd/providers") {
+				if strings.HasPrefix(filepath.ToSlash(rel), "cmd/credproxyd/providers") {
 					return filepath.SkipDir
 				}
 				return nil

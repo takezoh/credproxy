@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/takezoh/credproxy/internal/childproc"
 )
 
 const (
@@ -152,7 +154,9 @@ func checkFlavor(w http.ResponseWriter, r *http.Request) bool {
 
 func gcpPrintAccessToken(ctx context.Context, account, serviceAccount string) (string, error) {
 	args := buildPrintAccessTokenArgs(account, serviceAccount)
-	out, err := exec.CommandContext(ctx, "gcloud", args...).Output()
+	c := exec.CommandContext(ctx, "gcloud", args...)
+	childproc.NoWindow(c)
+	out, err := c.Output()
 	if err != nil {
 		return "", err
 	}

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	credproxylib "github.com/takezoh/credproxy/credproxy"
+	"github.com/takezoh/credproxy/internal/childproc"
 )
 
 // RoutePath is the proxy path prefix served by this provider.
@@ -161,6 +162,7 @@ func exportCredentials(ctx context.Context, profile string) (processCredentials,
 	}
 	var stdout bytes.Buffer
 	c := exec.CommandContext(ctx, "aws", args...)
+	childproc.NoWindow(c)
 	c.Stdout = &stdout
 	if err := c.Run(); err != nil {
 		return processCredentials{}, time.Time{}, err
@@ -242,6 +244,7 @@ func getRoleCredentials(ctx context.Context, accountID, roleName, accessToken st
 		"--access-token", accessToken,
 		"--output", "json",
 	)
+	childproc.NoWindow(c)
 	c.Stdout = &stdout
 	if err := c.Run(); err != nil {
 		return processCredentials{}, time.Time{}, err

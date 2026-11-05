@@ -20,12 +20,13 @@ $oldBinDir = $env:BINDIR
 $oldProfile = $env:USERPROFILE
 $oldLog = $env:GO_FIXTURE_LOG
 $oldFailPackage = $env:GO_FIXTURE_FAIL_PACKAGE
+$oldGoFlags = $env:GOFLAGS
 
 New-Item -ItemType Directory -Path $fixtureDir -Force | Out-Null
 if ($runningOnWindows) {
-    $fixture = "@echo off`r`nsetlocal`r`n>>`"%GO_FIXTURE_LOG%`" echo %CD%^|%~3^|%~4`r`nif `"%GO_FIXTURE_FAIL_PACKAGE%`"==`"%~4`" (>&2 echo fixture failure & exit /b 17)`r`n>&2 echo fixture progress`r`n> `"%~3`" echo fixture`r`nexit /b 0`r`n"
+    $fixture = "@echo off`r`nsetlocal`r`n>>`"%GO_FIXTURE_LOG%`" echo %CD%^|%~3^|%~4^|%GOFLAGS%`r`nif `"%GO_FIXTURE_FAIL_PACKAGE%`"==`"%~4`" (>&2 echo fixture failure & exit /b 17)`r`n>&2 echo fixture progress`r`n> `"%~3`" echo fixture`r`nexit /b 0`r`n"
 } else {
-    $fixture = "#!/bin/sh`nprintf '%s|%s|%s\n' `"`$PWD`" `"`$3`" `"`$4`" >> `"`$GO_FIXTURE_LOG`"`nif [ `"`$GO_FIXTURE_FAIL_PACKAGE`" = `"`$4`" ]; then echo 'fixture failure' >&2; exit 17; fi`necho 'fixture progress' >&2`nprintf fixture > `"`$3`"`n"
+    $fixture = "#!/bin/sh`nprintf '%s|%s|%s|%s\n' `"`$PWD`" `"`$3`" `"`$4`" `"`$GOFLAGS`" >> `"`$GO_FIXTURE_LOG`"`nif [ `"`$GO_FIXTURE_FAIL_PACKAGE`" = `"`$4`" ]; then echo 'fixture failure' >&2; exit 17; fi`necho 'fixture progress' >&2`nprintf fixture > `"`$3`"`n"
 }
 [System.IO.File]::WriteAllText($fixturePath, $fixture, [System.Text.Encoding]::ASCII)
 if (-not $runningOnWindows) {
@@ -39,7 +40,9 @@ try {
     $beforeLocation = (Get-Location).Path
 
     $env:BINDIR = Join-Path $tempRoot "override output"
+    $env:GOFLAGS = "-trimpath"
     & $installer
+    Assert-Condition ($env:GOFLAGS -eq "-trimpath") "installer did not restore the caller's GOFLAGS"
     Assert-Condition (Test-Path -LiteralPath (Join-Path $env:BINDIR "credproxyd.exe") -PathType Leaf) "daemon exe was not installed to BINDIR"
     Assert-Condition (Test-Path -LiteralPath (Join-Path $env:BINDIR "credproxy.exe") -PathType Leaf) "client exe was not installed to BINDIR"
     Assert-Condition ((Get-Location).Path -eq $beforeLocation) "installer did not restore the caller's location"
@@ -49,11 +52,14 @@ try {
     $expectedPackages = @("./cmd/credproxyd", "./cmd/credproxy")
     $expectedOutputs = @("credproxyd.exe", "credproxy.exe")
     for ($index = 0; $index -lt $calls.Count; $index++) {
-        $parts = $calls[$index] -split "\|", 3
-        Assert-Condition ($parts.Count -eq 3) "Go fixture did not record cwd, output, and package"
+        $parts = $calls[$index] -split "\|", 4
+        Assert-Condition ($parts.Count -eq 4) "Go fixture did not record cwd, output, package, and GOFLAGS"
         Assert-Condition ([System.IO.Path]::GetFullPath($parts[0]) -eq [System.IO.Path]::GetFullPath($repoDir)) "Go build did not run from the checkout root"
         Assert-Condition ($parts[1] -eq (Join-Path $env:BINDIR $expectedOutputs[$index])) "Go build targeted an unexpected output path"
         Assert-Condition ($parts[2] -eq $expectedPackages[$index]) "Go build targeted an unexpected package"
+        # Only the Windows daemon is built without a console; caller flags are kept.
+        $expectedFlags = if ($runningOnWindows -and $index -eq 0) { "-trimpath -ldflags=-H=windowsgui" } else { "-trimpath" }
+        Assert-Condition ($parts[3].Trim() -eq $expectedFlags) "unexpected GOFLAGS for $($expectedOutputs[$index]): $($parts[3])"
     }
 
     $env:BINDIR = $null
@@ -84,6 +90,7 @@ try {
     $env:USERPROFILE = $oldProfile
     $env:GO_FIXTURE_LOG = $oldLog
     $env:GO_FIXTURE_FAIL_PACKAGE = $oldFailPackage
+    $env:GOFLAGS = $oldGoFlags
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 

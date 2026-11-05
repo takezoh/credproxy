@@ -26,20 +26,39 @@ func main() {
 
 func run() error {
 	cfgPath := flag.String("config", "", "path to config.toml (required)")
+	logFile := flag.String("log-file", "", "append JSON logs to this file instead of stderr")
 	flag.Parse()
 
 	if *cfgPath == "" {
 		flag.Usage()
 		return fmt.Errorf("--config is required")
 	}
+	if *logFile == "" {
+		return serve(*cfgPath)
+	}
+	out, err := openLogFile(*logFile)
+	if err != nil {
+		return fmt.Errorf("log file: %w", err)
+	}
+	logOutput = out
+	// Record failures before the configured level is known, and the final
+	// error: without a console they would otherwise be lost.
+	initLogger("")
+	if err := serve(*cfgPath); err != nil {
+		slog.Error("credproxyd failed", "error", err)
+		return err
+	}
+	return nil
+}
 
-	cfg, err := config.Load(*cfgPath)
+func serve(cfgPath string) error {
+	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		return err
 	}
 
 	initLogger(cfg.LogLevel)
-	slog.Info("credproxyd starting", "config", *cfgPath)
+	slog.Info("credproxyd starting", "config", cfgPath)
 
 	var rawTokens []config.Token
 	if cfg.AuthTokensFile != "" {
@@ -159,19 +178,4 @@ func trimPrefix(path string) string {
 		return path[1:]
 	}
 	return path
-}
-
-func initLogger(level string) {
-	var l slog.Level
-	switch level {
-	case "debug":
-		l = slog.LevelDebug
-	case "warn", "warning":
-		l = slog.LevelWarn
-	case "error":
-		l = slog.LevelError
-	default:
-		l = slog.LevelInfo
-	}
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: l})))
 }

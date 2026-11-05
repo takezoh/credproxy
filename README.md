@@ -108,6 +108,10 @@ consuming environment. `make install` is a thin alias for `bash install.sh`.
 On Windows, run `.\install.ps1` from PowerShell. It builds `credproxyd.exe` and
 `credproxy.exe` into `$env:USERPROFILE\.local\bin` (override with `$env:BINDIR`);
 config, hooks, and services remain owned by the consuming environment.
+`credproxyd.exe` is built without a console (`-H=windowsgui`) so that a logon task
+does not show a window that stops the daemon when it is closed; it starts every
+helper process without a window as well. It has no stderr, so pass
+`--log-file <path>` to keep its logs. `credproxy.exe` stays a console program.
 
 Configure:
 
@@ -212,6 +216,10 @@ Start:
 ```sh
 # Direct
 credproxyd --config ~/.config/credproxyd/config.toml
+
+# Append JSON logs to a file instead of stderr (required on Windows, where the
+# daemon has no console). A file over 10 MiB is moved to <path>.1 at startup.
+credproxyd --config ~/.config/credproxyd/config.toml --log-file ~/.local/state/credproxyd/credproxyd.log
 
 # systemd
 sudo systemctl enable --now credproxyd

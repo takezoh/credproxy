@@ -18,6 +18,7 @@ import (
 
 	"github.com/takezoh/credproxy/container"
 	credproxylib "github.com/takezoh/credproxy/credproxy"
+	"github.com/takezoh/credproxy/internal/childproc"
 )
 
 const (
@@ -118,6 +119,7 @@ func (b *SpecBuilder) spawnAgent(projectPath string, keys []string) (*ephemeralA
 	_ = os.Remove(sockPath)
 
 	cmd := exec.CommandContext(b.ctx, "ssh-agent", "-D", "-a", sockPath)
+	childproc.NoWindow(cmd)
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("ssh-agent: %w", err)
 	}
@@ -152,6 +154,7 @@ func addKeys(sockPath string, keys []string) {
 			continue
 		}
 		cmd := exec.Command("ssh-add", k)
+		childproc.NoWindow(cmd)
 		cmd.Env = append(os.Environ(), "SSH_AUTH_SOCK="+sockPath)
 		cmd.Stdin = nil
 		if out, err := cmd.CombinedOutput(); err != nil {

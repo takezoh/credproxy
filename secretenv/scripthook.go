@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"golang.org/x/sync/singleflight"
+
+	"github.com/takezoh/credproxy/internal/childproc"
 )
 
 const defaultHookSafety = 30 * time.Second
@@ -106,6 +108,7 @@ func (h *ScriptHook) run(ctx context.Context, ref string) (string, time.Time, er
 
 	var stdout, stderr bytes.Buffer
 	c := exec.CommandContext(runCtx, h.cmd[0], h.cmd[1:]...)
+	childproc.NoWindow(c)
 	c.Stdin = bytes.NewReader(stdin)
 	c.Stdout = &stdout
 	c.Stderr = &stderr

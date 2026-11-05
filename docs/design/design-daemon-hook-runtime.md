@@ -22,6 +22,10 @@ invariants:
 - id: INV-002
   statement: Unix sockets default to mode 0600 and a non-socket path is never removed.
   enforcement: test
+- id: INV-003
+  statement: On Windows credproxyd has no console. Every helper process it starts
+    is started without a window, and its logs go to the file given by --log-file.
+  enforcement: test
 boundaries:
   provides:
   - credproxyd TCP and Unix-socket service
@@ -88,6 +92,8 @@ Hooks own backend login and refresh logic. The daemon only maps their generic in
 ## Invariants
 
 TCP is authenticated by default, Unix sockets are owner-only by default, and hook failures are observable as request failures.
+
+On Windows credproxyd has no console: it starts every helper process without a window and writes its logs to the file given by `--log-file`.
 
 ## Collaboration
 

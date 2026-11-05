@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/takezoh/credproxy/credproxy"
+	"github.com/takezoh/credproxy/internal/childproc"
 )
 
 const defaultSafety = 30 * time.Second
@@ -110,6 +111,7 @@ func (p *Provider) run(ctx context.Context, action string, req credproxy.Request
 
 	var stdout, stderr bytes.Buffer
 	c := exec.CommandContext(tCtx, cmd[0], cmd[1:]...)
+	childproc.NoWindow(c)
 	c.Stdin = bytes.NewReader(stdin)
 	c.Stdout = &stdout
 	c.Stderr = &stderr
