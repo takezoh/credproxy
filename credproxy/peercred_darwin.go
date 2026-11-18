@@ -17,23 +17,22 @@ func peerUIDIsCurrent(pc peerCred) bool {
 	return authorizePeer(pc, true, uint32(os.Getuid()))
 }
 
-// peerCredOf reads the peer UID from a Unix connection (macOS via getpeereid).
+// peerCredOf reads the peer UID from a Unix connection (macOS via LOCAL_PEERCRED).
 // Darwin exposes no peer PID through this path, so PID stays zero.
 func peerCredOf(uc *net.UnixConn) (peerCred, error) {
 	raw, err := uc.SyscallConn()
 	if err != nil {
 		return peerCred{}, err
 	}
-	var uid, gid uint32
+	var xucred *unix.Xucred
 	var sockErr error
 	if err := raw.Control(func(fd uintptr) {
-		uid, gid, sockErr = unix.Getpeereid(int(fd))
+		xucred, sockErr = unix.GetsockoptXucred(int(fd), unix.SOL_LOCAL, unix.LOCAL_PEERCRED)
 	}); err != nil {
 		return peerCred{}, err
 	}
 	if sockErr != nil {
 		return peerCred{}, sockErr
 	}
-	_ = gid
-	return peerCred{UID: uid, available: true}, nil
+	return peerCred{UID: xucred.Uid, available: true}, nil
 }
